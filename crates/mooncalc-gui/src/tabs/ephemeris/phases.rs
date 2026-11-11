@@ -1,29 +1,24 @@
 //! Lunar phases of a year: new Moon, first quarter, full Moon and last
 //! quarter for each lunation, with the Moon's age at each phase and the
-//! length of each lunation (`mooncalc_core::events::phases`: Meeus ch. 49
-//! refined against the ephemeris).
+//! length of each lunation, from the shared service
+//! `mooncalc_app::tables::lunar_phases` (`mooncalc_core::events::phases`:
+//! Meeus ch. 49 refined against the ephemeris).
 
+use mooncalc_app::dto::ApiError;
+use mooncalc_app::tables::{YEAR_COVERAGE_MARGIN_DAYS, YearParams};
 use mooncalc_atlas::Zone;
-use std::collections::BTreeMap;
-
-use mooncalc_core::events::Phase;
-use mooncalc_core::events::phases::{
-    SYNODIC_MONTH_DAYS, meeus_phase_jde, moon_age_days, phase_near_tt, phases_between,
-};
+#[cfg(test)]
+use mooncalc_core::events::phases::SYNODIC_MONTH_DAYS;
+use mooncalc_core::events::phases::moon_age_days;
 use mooncalc_core::{Ephemeris, Instant};
 
 use super::cached::CachedJob;
 use super::format;
-use super::{
-    EphKey, app_year, busy, ephemeris, error_line, set_app_time, time_link, year_bounds,
-    year_picker,
-};
+use super::{EphKey, app_year, busy, ephemeris, error_line, set_app_time, time_link, year_picker};
 use super::{LUNATION_MARGIN, coverage, year_coverage};
+use crate::jobs::JobError;
 use crate::tabs::TabContext;
 use crate::widgets::coverage::coverage_notice;
-
-/// Epoch of Meeus' lunation numbers (k = 0: new Moon of 2000 January 6).
-const LUNATION_EPOCH_JDE: f64 = 2_451_550.097_66;
 
 /// One lunation's phases that fall in the year.
 #[derive(Clone, Debug, PartialEq)]
@@ -45,27 +40,27 @@ impl Lunation {
     }
 }
 
-/// The lunations with at least one phase in `[t0, t1)`.
-pub fn lunations(eph: &dyn Ephemeris, t0: Instant, t1: Instant) -> Vec<Lunation> {
-    let mut by_k: BTreeMap<i64, [Option<Instant>; 4]> = BTreeMap::new();
-    for (phase, t) in phases_between(eph, t0, t1) {
-        let i = Phase::ALL.iter().position(|p| *p == phase).unwrap_or(0);
-        let k = ((t.jd_tt() - LUNATION_EPOCH_JDE) / SYNODIC_MONTH_DAYS - phase.fraction()).round()
-            as i64;
-        by_k.entry(k).or_default()[i] = Some(t);
-    }
-    let new_moon = |k: i64| phase_near_tt(eph, Phase::New, meeus_phase_jde(k as f64));
-    by_k.into_iter()
-        .map(|(k, phases)| {
-            let start = new_moon(k);
-            Lunation {
-                k,
-                new_moon: Instant::from_jd_tt(start),
-                length_days: new_moon(k + 1) - start,
-                phases,
-            }
+/// The lunations with at least one phase in local `year`
+/// (`mooncalc_app::tables::lunar_phases`).
+pub fn lunations(eph: &dyn Ephemeris, year: i32, tz: Zone) -> Result<Vec<Lunation>, ApiError> {
+    let y = mooncalc_app::tables::lunar_phases(
+        eph,
+        &YearParams {
+            year,
+            tz_offset_hours: tz.fixed_offset_hours().unwrap_or_default(),
+            time_zone: tz.iana_name().map(str::to_owned),
+            ephemeris_id: None,
+        },
+    )?;
+    Ok(y.lunations
+        .iter()
+        .map(|l| Lunation {
+            k: l.k,
+            new_moon: l.new_moon.to_instant(),
+            length_days: l.length_days,
+            phases: l.phases.map(|t| t.map(|t| t.to_instant())),
         })
-        .collect()
+        .collect())
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -86,7 +81,7 @@ impl PhasesView {
     /// The year's lunations need the new Moons before and after it.
     fn coverage(&self, tc: &TabContext<'_>) -> Option<String> {
         let year = self.year.unwrap_or(app_year(tc.settings));
-        year_coverage(tc.settings, year, LUNATION_MARGIN)
+        year_coverage(tc.settings, year, YEAR_COVERAGE_MARGIN_DAYS)
     }
 
     pub fn poll(&mut self, ctx: &egui::Context, tc: &mut TabContext<'_>, visible: bool) {
@@ -99,8 +94,8 @@ impl PhasesView {
             let eph = ephemeris(tc.settings);
             self.job
                 .request(ctx, req, "Computing lunar phases", move |req, _| {
-                    let (t0, t1) = year_bounds(req.year, req.tz);
-                    Ok(lunations(eph.as_ref(), t0, t1))
+                    lunations(eph.as_ref(), req.year, req.tz)
+                        .map_err(|e| JobError::Failed(e.message))
                 });
         }
         self.job.poll(tc.status);
@@ -198,8 +193,7 @@ mod tests {
     #[test]
     fn phases_of_2024() {
         let eph = MeeusEphemeris::new();
-        let (t0, t1) = year_bounds(2024, Zone::UTC);
-        let ls = lunations(&eph, t0, t1);
+        let ls = lunations(&eph, 2024, Zone::UTC).unwrap();
         let count: usize = ls.iter().map(|l| l.phases.iter().flatten().count()).sum();
         // 2024 has 13 new Moons (the last on 30 December), 12 first
         // quarters, 12 full Moons and 13 last quarters (USNO).

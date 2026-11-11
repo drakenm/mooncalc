@@ -1,23 +1,21 @@
 //! Apsides and nodes of a year: lunar perigee/apogee with distance (Meeus
 //! ch. 50), node passages (ch. 51) and maximum declinations (ch. 52), each
-//! refined against the ephemeris by `mooncalc_core`.
+//! refined against the ephemeris by `mooncalc_core`, from the shared
+//! service `mooncalc_app::tables::apsides_nodes`.
 
+use mooncalc_app::dto::{ApiError, UtDateTime};
+use mooncalc_app::tables::{YEAR_COVERAGE_MARGIN_DAYS, YearParams};
 use mooncalc_atlas::Zone;
-use mooncalc_core::Instant;
 use mooncalc_core::angle::DEG;
-use mooncalc_core::apsides::{Apsis, ApsisKind, apsides_between};
-use mooncalc_core::nodes::{
-    DeclinationExtreme, MaxDeclination, NodeKind, NodePassage, max_declinations_between,
-    node_passages_between,
-};
+use mooncalc_core::apsides::{Apsis, ApsisKind};
+use mooncalc_core::nodes::{DeclinationExtreme, MaxDeclination, NodeKind, NodePassage};
+use mooncalc_core::{Ephemeris, Instant};
 
 use super::cached::CachedJob;
 use super::format;
-use super::{
-    EphKey, app_year, busy, ephemeris, error_line, set_app_time, time_link, year_bounds,
-    year_picker,
-};
-use super::{LUNATION_MARGIN, year_coverage};
+use super::year_coverage;
+use super::{EphKey, app_year, busy, ephemeris, error_line, set_app_time, time_link, year_picker};
+use crate::jobs::JobError;
 use crate::tabs::TabContext;
 use crate::widgets::coverage::coverage_notice;
 
@@ -27,6 +25,64 @@ pub struct YearEvents {
     pub apsides: Vec<Apsis>,
     pub nodes: Vec<NodePassage>,
     pub declinations: Vec<MaxDeclination>,
+}
+
+fn jd_tt(t: &UtDateTime) -> f64 {
+    t.to_instant().jd_tt()
+}
+
+/// The events of local `year` (`mooncalc_app::tables::apsides_nodes`).
+pub fn year_events(eph: &dyn Ephemeris, year: i32, tz: Zone) -> Result<YearEvents, ApiError> {
+    let y = mooncalc_app::tables::apsides_nodes(
+        eph,
+        &YearParams {
+            year,
+            tz_offset_hours: tz.fixed_offset_hours().unwrap_or_default(),
+            time_zone: tz.iana_name().map(str::to_owned),
+            ephemeris_id: None,
+        },
+    )?;
+    Ok(YearEvents {
+        apsides: y
+            .apsides
+            .iter()
+            .map(|a| Apsis {
+                kind: if a.kind == "perigee" {
+                    ApsisKind::Perigee
+                } else {
+                    ApsisKind::Apogee
+                },
+                jd_tt: jd_tt(&a.time),
+                distance_km: a.distance_km,
+                parallax: a.parallax_arcsec / 3600.0 * DEG,
+            })
+            .collect(),
+        nodes: y
+            .nodes
+            .iter()
+            .map(|n| NodePassage {
+                kind: if n.kind == "ascending" {
+                    NodeKind::Ascending
+                } else {
+                    NodeKind::Descending
+                },
+                jd_tt: jd_tt(&n.time),
+            })
+            .collect(),
+        declinations: y
+            .declinations
+            .iter()
+            .map(|d| MaxDeclination {
+                kind: if d.kind == "north" {
+                    DeclinationExtreme::North
+                } else {
+                    DeclinationExtreme::South
+                },
+                jd_tt: jd_tt(&d.time),
+                dec: d.dec_deg * DEG,
+            })
+            .collect(),
+    })
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -47,7 +103,7 @@ impl ApsidesView {
     /// The searches bracket events up to half a month beyond the year.
     fn coverage(&self, tc: &TabContext<'_>) -> Option<String> {
         let year = self.year.unwrap_or(app_year(tc.settings));
-        year_coverage(tc.settings, year, LUNATION_MARGIN)
+        year_coverage(tc.settings, year, YEAR_COVERAGE_MARGIN_DAYS)
     }
 
     pub fn poll(&mut self, ctx: &egui::Context, tc: &mut TabContext<'_>, visible: bool) {
@@ -59,23 +115,9 @@ impl ApsidesView {
             };
             let eph = ephemeris(tc.settings);
             self.job
-                .request(ctx, req, "Computing apsides and nodes", move |req, job| {
-                    let (t0, t1) = year_bounds(req.year, req.tz);
-                    let (a, b) = (t0.jd_tt(), t1.jd_tt());
-                    let e = Some(eph.as_ref());
-                    let apsides = apsides_between(e, a, b);
-                    job.set_progress(0.4);
-                    job.checkpoint()?;
-                    let nodes = node_passages_between(e, a, b);
-                    job.set_progress(0.7);
-                    job.checkpoint()?;
-                    let mut declinations = max_declinations_between(e, a, b);
-                    declinations.sort_by(|x, y| x.jd_tt.total_cmp(&y.jd_tt));
-                    Ok(YearEvents {
-                        apsides,
-                        nodes,
-                        declinations,
-                    })
+                .request(ctx, req, "Computing apsides and nodes", move |req, _| {
+                    year_events(eph.as_ref(), req.year, req.tz)
+                        .map_err(|e| JobError::Failed(e.message))
                 });
         }
         self.job.poll(tc.status);

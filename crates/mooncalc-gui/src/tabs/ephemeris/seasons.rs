@@ -1,28 +1,23 @@
 //! Seasons: equinoxes and solstices of a year (Meeus ch. 27 refined
 //! against the ephemeris by `mooncalc_core::seasons`) and the equation of
-//! time through the year (Meeus eq. 28.1).
+//! time through the year (Meeus eq. 28.1), from the shared service
+//! `mooncalc_app::tables::seasons`.
 
+use mooncalc_app::dto::ApiError;
+use mooncalc_app::tables::{YEAR_COVERAGE_MARGIN_DAYS, YearParams};
 use mooncalc_atlas::Zone;
 use mooncalc_core::Instant;
-use mooncalc_core::seasons::{equation_of_time, seasons_of_year};
+use mooncalc_core::events::CalendarDate;
+use mooncalc_core::seasons::equation_of_time;
 
 use super::cached::CachedJob;
 use super::chart::{self, Chart, Marker};
 use super::format;
-use super::{DAY_MARGIN, coverage, year_coverage};
-use super::{
-    EphKey, app_year, busy, ephemeris, error_line, set_app_time, time_link, year_bounds,
-    year_picker,
-};
+use super::{EphKey, app_year, busy, ephemeris, error_line, set_app_time, time_link, year_picker};
+use super::{coverage, year_coverage};
+use crate::jobs::JobError;
 use crate::tabs::TabContext;
 use crate::widgets::coverage::coverage_notice;
-
-const SEASON_NAMES: [&str; 4] = [
-    "March equinox",
-    "June solstice",
-    "September equinox",
-    "December solstice",
-];
 
 /// Minutes of time per radian of hour angle.
 const MIN_PER_RAD: f64 = 720.0 / std::f64::consts::PI;
@@ -31,6 +26,8 @@ const MIN_PER_RAD: f64 = 720.0 / std::f64::consts::PI;
 #[derive(Clone, Debug, PartialEq)]
 pub struct YearSeasons {
     pub year: i32,
+    /// "March equinox" ... "December solstice".
+    pub names: [String; 4],
     /// Equinoxes and solstices, in order.
     pub seasons: [Instant; 4],
     /// Equation of time at each season, minutes.
@@ -39,25 +36,38 @@ pub struct YearSeasons {
     pub daily_eot: Vec<(Instant, f64)>,
 }
 
-/// Compute the seasons and the daily equation of time of `year`.
-pub fn year_seasons(eph: &dyn mooncalc_core::Ephemeris, year: i32, tz: Zone) -> YearSeasons {
-    let jd = seasons_of_year(eph, year);
-    let seasons = jd.map(Instant::from_jd_tt);
-    let eot = |t: Instant| equation_of_time(eph, t.jd_tt()) * MIN_PER_RAD;
-    let (t0, t1) = year_bounds(year, tz);
-    let days = (t1.jd_ut - t0.jd_ut).round() as usize;
-    let daily_eot = (0..days)
-        .map(|d| {
-            let t = t0.add_days(d as f64 + 0.5);
-            (t, eot(t))
-        })
-        .collect();
-    YearSeasons {
+/// The seasons and the daily equation of time of local `year`
+/// (`mooncalc_app::tables::seasons`).
+pub fn year_seasons(
+    eph: &dyn mooncalc_core::Ephemeris,
+    year: i32,
+    tz: Zone,
+) -> Result<YearSeasons, ApiError> {
+    let y = mooncalc_app::tables::seasons(
+        eph,
+        &YearParams {
+            year,
+            tz_offset_hours: tz.fixed_offset_hours().unwrap_or_default(),
+            time_zone: tz.iana_name().map(str::to_owned),
+            ephemeris_id: None,
+        },
+    )?;
+    let at = |i: usize| y.seasons.get(i);
+    let season = |i: usize| at(i).map_or(Instant::from_jd_ut(f64::NAN), |s| s.time.to_instant());
+    let eot = |i: usize| at(i).map_or(f64::NAN, |s| s.equation_of_time_min);
+    let name = |i: usize| at(i).map_or_else(String::new, |s| s.name.clone());
+    Ok(YearSeasons {
         year,
-        seasons,
-        eot_at_seasons: seasons.map(eot),
-        daily_eot,
-    }
+        names: [0, 1, 2, 3].map(name),
+        seasons: [0, 1, 2, 3].map(season),
+        eot_at_seasons: [0, 1, 2, 3].map(eot),
+        // Local noon of each day.
+        daily_eot: y
+            .equation_of_time
+            .iter()
+            .map(|p| (tz.civil_noon(CalendarDate::from(p.date)), p.minutes))
+            .collect(),
+    })
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -77,7 +87,7 @@ pub struct SeasonsView {
 impl SeasonsView {
     fn coverage(&self, tc: &TabContext<'_>) -> Option<String> {
         let year = self.year.unwrap_or(app_year(tc.settings));
-        year_coverage(tc.settings, year, DAY_MARGIN)
+        year_coverage(tc.settings, year, YEAR_COVERAGE_MARGIN_DAYS)
     }
 
     pub fn poll(&mut self, ctx: &egui::Context, tc: &mut TabContext<'_>, visible: bool) {
@@ -90,7 +100,8 @@ impl SeasonsView {
             let eph = ephemeris(tc.settings);
             self.job
                 .request(ctx, req, "Computing seasons", move |req, _| {
-                    Ok(year_seasons(eph.as_ref(), req.year, req.tz))
+                    year_seasons(eph.as_ref(), req.year, req.tz)
+                        .map_err(|e| JobError::Failed(e.message))
                 });
         }
         self.job.poll(tc.status);
@@ -132,10 +143,8 @@ impl SeasonsView {
                         ui.strong(h);
                     }
                     ui.end_row();
-                    for ((name, t), eot) in
-                        SEASON_NAMES.iter().zip(ys.seasons).zip(ys.eot_at_seasons)
-                    {
-                        ui.label(*name);
+                    for ((name, t), eot) in ys.names.iter().zip(ys.seasons).zip(ys.eot_at_seasons) {
+                        ui.label(name);
                         if time_link(ui, format::date_time(t, tz)) {
                             clicked = Some(t);
                         }
@@ -226,7 +235,7 @@ mod tests {
     #[test]
     fn equation_of_time_extremes_2024() {
         let eph = MeeusEphemeris::new();
-        let ys = year_seasons(&eph, 2024, Zone::UTC);
+        let ys = year_seasons(&eph, 2024, Zone::UTC).unwrap();
         assert_eq!(ys.daily_eot.len(), 366);
         let c = ys.seasons[0].to_calendar();
         assert_eq!((c.month, c.day), (3, 20));

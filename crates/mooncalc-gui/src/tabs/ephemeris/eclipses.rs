@@ -1,173 +1,87 @@
-//! Eclipses of a range of years (`mooncalc_core::eclipses`): the Meeus
-//! ch. 54 search refined against the ephemeris (Besselian elements for
-//! solar eclipses, Danjon's shadow for lunar ones), with local
-//! circumstances at the app location: contacts, maximum, magnitude and
-//! obscuration of solar eclipses (`local_solar_eclipse`), and whether the
-//! Moon is above the horizon at each contact of a lunar eclipse.
+//! Eclipses of a range of years, from the shared services
+//! `mooncalc_app::tables::eclipse_candidates` and `eclipse_details`
+//! (`mooncalc_core::eclipses`: the Meeus ch. 54 search refined against the
+//! ephemeris, Besselian elements for solar eclipses, Danjon's shadow for
+//! lunar ones), with local circumstances at the app location: contacts,
+//! maximum, magnitude and obscuration of solar eclipses, and whether the
+//! Moon is above the horizon at each contact of a lunar eclipse. The job
+//! refines one eclipse at a time, so it reports progress and can be
+//! cancelled.
 
-use mooncalc_atlas::Zone;
-use mooncalc_core::angle::DEG;
-use mooncalc_core::eclipses::{
-    Eclipse, EclipseContact, EclipseFilter, LocalEclipseKind, LocalSolarEclipse,
-    LunarEclipseDetails, LunarEclipseKind, SolarEclipseDetails, SolarEclipseKind,
-    eclipses_in_years, local_solar_eclipse, refine_lunar_eclipse, refine_solar_eclipse,
+use mooncalc_app::dto::{Location, UtDateTime};
+use mooncalc_app::tables::{
+    ECLIPSE_COVERAGE_MARGIN_DAYS, EclipseDto, EclipseKindFilter, EclipsesParams, LunarContactDto,
+    SolarContactDto, eclipse_candidates, eclipse_details,
 };
-use mooncalc_core::events::{Body, DirectSource, Horizon, Observer};
-use mooncalc_core::{Ephemeris, GeoLocation, Instant};
+use mooncalc_atlas::Zone;
+use mooncalc_core::{Ephemeris, Instant};
 use serde::{Deserialize, Serialize};
 
 use super::cached::CachedJob;
 use super::format;
 use super::{EphKey, app_year, busy, ephemeris, error_line, set_app_time, time_link};
-use super::{LUNATION_MARGIN, coverage, year_bounds};
+use super::{coverage, year_bounds};
+use crate::jobs::{JobContext, JobError};
 use crate::tabs::TabContext;
 use crate::widgets::coverage::coverage_notice;
 
-/// The Moon at one contact of a lunar eclipse, seen from the observer.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct MoonAtContact {
-    pub label: &'static str,
-    pub time: Instant,
-    /// Topocentric airless altitude of the Moon's centre, radians.
-    pub alt: f64,
-    /// Upper limb above the horizon (34′ refraction).
-    pub above: bool,
-}
-
 /// One eclipse with its refined details and local circumstances.
-#[derive(Clone, Debug, PartialEq)]
-pub enum EclipseItem {
-    Solar {
-        details: SolarEclipseDetails,
-        local: Option<LocalSolarEclipse>,
-    },
-    Lunar {
-        details: LunarEclipseDetails,
-        contacts: Vec<MoonAtContact>,
-    },
+pub type EclipseItem = EclipseDto;
+
+fn instant(t: &UtDateTime) -> Instant {
+    t.to_instant()
 }
 
-impl EclipseItem {
-    pub fn greatest(&self) -> Instant {
-        Instant::from_jd_tt(match self {
-            Self::Solar { details, .. } => details.jd_tt,
-            Self::Lunar { details, .. } => details.jd_tt,
-        })
-    }
-
-    pub fn kind_label(&self) -> String {
-        match self {
-            Self::Solar { details, .. } => format!("Solar {}", solar_kind(details.kind)),
-            Self::Lunar { details, .. } => format!("Lunar {}", lunar_kind(details.kind)),
-        }
-    }
-
-    pub fn gamma(&self) -> f64 {
-        match self {
-            Self::Solar { details, .. } => details.gamma,
-            Self::Lunar { details, .. } => details.gamma,
-        }
+/// The label of a lunar-eclipse contact.
+fn contact_label(c: &LunarContactDto) -> &str {
+    match c.code.as_str() {
+        "P1" => "P1 penumbral begins",
+        "U1" => "U1 partial begins",
+        "U2" => "U2 total begins",
+        "max" => "Greatest eclipse",
+        "U3" => "U3 total ends",
+        "U4" => "U4 partial ends",
+        "P4" => "P4 penumbral ends",
+        _ => &c.label,
     }
 }
 
-fn solar_kind(k: SolarEclipseKind) -> &'static str {
-    match k {
-        SolarEclipseKind::Partial => "partial",
-        SolarEclipseKind::Annular => "annular",
-        SolarEclipseKind::Total => "total",
-        SolarEclipseKind::Hybrid => "hybrid",
-    }
-}
-
-fn lunar_kind(k: LunarEclipseKind) -> &'static str {
-    match k {
-        LunarEclipseKind::Penumbral => "penumbral",
-        LunarEclipseKind::Partial => "partial",
-        LunarEclipseKind::Total => "total",
-    }
-}
-
-fn local_kind(k: LocalEclipseKind) -> &'static str {
-    match k {
-        LocalEclipseKind::Partial => "partial",
-        LocalEclipseKind::Annular => "annular",
-        LocalEclipseKind::Total => "total",
-    }
-}
-
-/// The Moon at each contact of a lunar eclipse, for an observer.
-pub fn lunar_contacts(
-    eph: &dyn Ephemeris,
-    d: &LunarEclipseDetails,
-    loc: &GeoLocation,
-) -> Vec<MoonAtContact> {
-    let src = DirectSource::new(eph);
-    let obs = Observer::new(loc);
-    [
-        ("P1 penumbral begins", d.p1),
-        ("U1 partial begins", d.u1),
-        ("U2 total begins", d.u2),
-        ("Greatest eclipse", Some(d.jd_tt)),
-        ("U3 total ends", d.u3),
-        ("U4 partial ends", d.u4),
-        ("P4 penumbral ends", d.p4),
-    ]
-    .into_iter()
-    .filter_map(|(label, jd)| {
-        let time = Instant::from_jd_tt(jd?);
-        let look = obs.look(&src, Body::Moon, time.jd_ut);
-        let target = Horizon::STANDARD.target(Body::Moon, look.distance_km, loc.elevation_m);
-        Some(MoonAtContact {
-            label,
-            time,
-            alt: look.alt,
-            above: look.alt > target,
-        })
-    })
-    .collect()
-}
-
-/// Every eclipse of `first..=last` with details and local circumstances.
+/// Every eclipse of `first..=last` with details and local circumstances
+/// at `location`, refined one at a time with progress and cancellation.
 pub fn eclipse_items(
     eph: &dyn Ephemeris,
     first: i32,
     last: i32,
-    filter: EclipseFilter,
-    loc: &GeoLocation,
-    mut progress: impl FnMut(f32) -> bool,
-) -> Option<Vec<EclipseItem>> {
-    let list = eclipses_in_years(first, last, filter);
+    filter: EclipseKindFilter,
+    location: Location,
+    job: &JobContext,
+) -> Result<Vec<EclipseItem>, JobError> {
+    let params = EclipsesParams {
+        first_year: first,
+        last_year: last,
+        filter,
+        location: Some(location),
+        ephemeris_id: None,
+        // Times are formatted here, in the app zone.
+        tz_offset_hours: 0.0,
+        time_zone: None,
+    };
+    let list = eclipse_candidates(eph, &params).map_err(|e| JobError::Failed(e.message))?;
     let n = list.len().max(1) as f32;
     let mut out = Vec::with_capacity(list.len());
     for (i, e) in list.iter().enumerate() {
-        if !progress(i as f32 / n) {
-            return None;
-        }
-        out.push(match e {
-            Eclipse::Solar(s) => {
-                let details = refine_solar_eclipse(eph, s);
-                EclipseItem::Solar {
-                    local: local_solar_eclipse(eph, details.jd_tt, loc),
-                    details,
-                }
-            }
-            Eclipse::Lunar(l) => {
-                let details = refine_lunar_eclipse(eph, l);
-                EclipseItem::Lunar {
-                    contacts: lunar_contacts(eph, &details, loc),
-                    details,
-                }
-            }
-        });
+        job.set_progress(i as f32 / n);
+        job.checkpoint()?;
+        out.push(eclipse_details(eph, e, params.location));
     }
-    Some(out)
+    Ok(out)
 }
 
 #[derive(Clone, Debug, PartialEq)]
 struct Request {
     first: i32,
     last: i32,
-    filter: EclipseFilter,
+    filter: EclipseKindFilter,
     location: (f64, f64, f64),
     eph: EphKey,
 }
@@ -192,11 +106,11 @@ impl EclipseKinds {
         }
     }
 
-    fn filter(self) -> EclipseFilter {
+    fn filter(self) -> EclipseKindFilter {
         match self {
-            Self::All => EclipseFilter::Any,
-            Self::Solar => EclipseFilter::Solar,
-            Self::Lunar => EclipseFilter::Lunar,
+            Self::All => EclipseKindFilter::Any,
+            Self::Solar => EclipseKindFilter::Solar,
+            Self::Lunar => EclipseKindFilter::Lunar,
         }
     }
 }
@@ -235,7 +149,7 @@ impl EclipsesView {
         (first, first + years - 1)
     }
 
-    /// The searched years, plus the lunations around them.
+    /// The searched years, plus the service's margin.
     fn coverage(&self, tc: &TabContext<'_>) -> Option<String> {
         let (first, last) = self.range(tc);
         let tz = tc.settings.time.zone();
@@ -245,8 +159,8 @@ impl EclipsesView {
             tc.settings,
             start.jd_ut,
             end.jd_ut,
-            LUNATION_MARGIN,
-            LUNATION_MARGIN,
+            ECLIPSE_COVERAGE_MARGIN_DAYS,
+            ECLIPSE_COVERAGE_MARGIN_DAYS,
         )
     }
 
@@ -264,12 +178,13 @@ impl EclipsesView {
             let eph = ephemeris(tc.settings);
             self.job
                 .request(ctx, req, "Computing eclipses", move |req, job| {
-                    let loc = GeoLocation::new(req.location.0, req.location.1, req.location.2);
-                    eclipse_items(eph.as_ref(), req.first, req.last, req.filter, &loc, |f| {
-                        job.set_progress(f);
-                        !job.is_cancelled()
-                    })
-                    .ok_or(crate::jobs::JobError::Cancelled)
+                    let (lat_deg, lon_deg, elevation_m) = req.location;
+                    let location = Location {
+                        lat_deg,
+                        lon_deg,
+                        elevation_m,
+                    };
+                    eclipse_items(eph.as_ref(), req.first, req.last, req.filter, location, job)
                 });
         }
         self.job.poll(tc.status);
@@ -361,18 +276,18 @@ impl EclipsesView {
                     }
                     ui.end_row();
                     for (i, item) in items.iter().enumerate() {
-                        let t = item.greatest();
+                        let t = instant(&item.greatest);
                         if time_link(ui, format::date_time(t, tz)) {
                             clicked = Some(t);
                             self.selected = Some(i);
                         }
                         if ui
-                            .selectable_label(self.selected == Some(i), item.kind_label())
+                            .selectable_label(self.selected == Some(i), &item.label)
                             .clicked()
                         {
                             self.selected = Some(i);
                         }
-                        ui.monospace(format!("{:+.4}", item.gamma()));
+                        ui.monospace(format!("{:+.4}", item.gamma));
                         let (mag, dur, here) = summary(item);
                         ui.monospace(mag);
                         ui.monospace(dur);
@@ -392,48 +307,47 @@ impl EclipsesView {
 
 /// Magnitude, duration and local-visibility summary of a list row.
 fn summary(item: &EclipseItem) -> (String, String, String) {
-    match item {
-        EclipseItem::Solar { details, local } => {
-            let here = match local {
-                Some(l) if l.max.sun.alt > 0.0 => {
-                    format!("{} {:.3}", local_kind(l.kind), l.magnitude)
-                }
-                Some(_) => "Sun below horizon at maximum".into(),
-                None => "not visible".into(),
-            };
-            (format!("{:.4}", details.magnitude), "—".into(), here)
-        }
-        EclipseItem::Lunar { details, contacts } => {
-            let mag = if details.kind == LunarEclipseKind::Penumbral {
-                format!("{:.4} (pen.)", details.penumbral_magnitude)
-            } else {
-                format!("{:.4}", details.umbral_magnitude)
-            };
-            let dur = details
-                .total_duration_min()
-                .map(|m| format!("total {}", format::duration_min(m)))
-                .or_else(|| {
-                    details
-                        .partial_duration_min()
-                        .map(|m| format!("partial {}", format::duration_min(m)))
-                })
-                .or_else(|| {
-                    details
-                        .penumbral_duration_min()
-                        .map(|m| format!("pen. {}", format::duration_min(m)))
-                })
-                .unwrap_or_else(|| "—".into());
-            let up = contacts.iter().filter(|c| c.above).count();
-            let here = if up == contacts.len() {
-                "Moon up throughout".into()
-            } else if up == 0 {
-                "Moon below horizon".into()
-            } else {
-                format!("Moon up at {up} of {} contacts", contacts.len())
-            };
-            (mag, dur, here)
-        }
+    if let Some(solar) = &item.solar {
+        let here = match &solar.local {
+            Some(l) if l.max.sun_alt_deg > 0.0 => format!("{} {:.3}", l.kind, l.magnitude),
+            Some(_) => "Sun below horizon at maximum".into(),
+            None => "not visible".into(),
+        };
+        return (format!("{:.4}", item.magnitude), "—".into(), here);
     }
+    let Some(d) = &item.lunar else {
+        return (format!("{:.4}", item.magnitude), "—".into(), String::new());
+    };
+    let mag = if item.kind == "penumbral" {
+        format!("{:.4} (pen.)", d.penumbral_magnitude)
+    } else {
+        format!("{:.4}", d.umbral_magnitude)
+    };
+    let dur = d
+        .total_duration_min
+        .map(|m| format!("total {}", format::duration_min(m)))
+        .or_else(|| {
+            d.partial_duration_min
+                .map(|m| format!("partial {}", format::duration_min(m)))
+        })
+        .or_else(|| {
+            d.penumbral_duration_min
+                .map(|m| format!("pen. {}", format::duration_min(m)))
+        })
+        .unwrap_or_else(|| "—".into());
+    let up = d
+        .contacts
+        .iter()
+        .filter(|c| c.above_horizon == Some(true))
+        .count();
+    let here = if up == d.contacts.len() {
+        "Moon up throughout".into()
+    } else if up == 0 {
+        "Moon below horizon".into()
+    } else {
+        format!("Moon up at {up} of {} contacts", d.contacts.len())
+    };
+    (mag, dur, here)
 }
 
 fn details_ui(
@@ -443,167 +357,168 @@ fn details_ui(
     location: &str,
     clicked: &mut Option<Instant>,
 ) {
-    let mut link = |ui: &mut egui::Ui, t: Instant| {
+    let mut link = |ui: &mut egui::Ui, t: &UtDateTime| {
+        let t = instant(t);
         if time_link(ui, format::date_time_seconds(t, tz)) {
             *clicked = Some(t);
         }
     };
-    ui.heading(item.kind_label());
-    match item {
-        EclipseItem::Solar { details: d, local } => {
-            egui::Grid::new("solar_details")
-                .num_columns(2)
-                .show(ui, |ui| {
-                    ui.label("Greatest eclipse");
-                    link(ui, Instant::from_jd_tt(d.jd_tt));
-                    ui.end_row();
-                    ui.label("γ");
-                    ui.monospace(format!("{:+.4}", d.gamma));
-                    ui.end_row();
-                    ui.label("Magnitude");
-                    ui.monospace(format!("{:.4}", d.magnitude));
-                    ui.end_row();
-                    ui.label("Central");
-                    ui.label(if d.central { "yes" } else { "no" });
-                    ui.end_row();
-                    ui.label("Point of greatest eclipse");
-                    ui.label(crate::location::format_lat_lon(d.lat_deg, d.lon_deg));
-                    ui.end_row();
-                    ui.label("Sun altitude there");
-                    ui.monospace(format!("{:.1}°", d.sun_alt / DEG));
-                    ui.end_row();
-                });
-            ui.add_space(8.0);
-            ui.strong(format!("Local circumstances — {location}"));
-            match local {
-                None => {
-                    ui.label("No phase of this eclipse reaches the observer.");
-                }
-                Some(l) => {
-                    egui::Grid::new("solar_local")
-                        .striped(true)
-                        .num_columns(4)
-                        .show(ui, |ui| {
-                            for h in ["Contact", "Time", "Sun alt", "Sun az"] {
-                                ui.strong(h);
-                            }
-                            ui.end_row();
-                            let rows: [(&str, Option<&EclipseContact>); 5] = [
-                                ("C1 partial begins", Some(&l.c1)),
-                                ("C2 central begins", l.c2.as_ref()),
-                                ("Maximum", Some(&l.max)),
-                                ("C3 central ends", l.c3.as_ref()),
-                                ("C4 partial ends", Some(&l.c4)),
-                            ];
-                            for (label, c) in rows {
-                                let Some(c) = c else { continue };
-                                ui.label(label);
-                                link(ui, Instant::from_jd_tt(c.jd_tt));
-                                let alt = c.sun.alt / DEG;
-                                let text = format!("{alt:+.1}°");
-                                if alt < 0.0 {
-                                    ui.colored_label(ui.visuals().warn_fg_color, text)
-                                        .on_hover_text("Sun below the horizon");
-                                } else {
-                                    ui.monospace(text);
-                                }
-                                ui.monospace(format!("{:.1}°", c.sun.az / DEG));
-                                ui.end_row();
-                            }
-                        });
-                    egui::Grid::new("solar_local_values")
-                        .num_columns(2)
-                        .show(ui, |ui| {
-                            ui.label("Local type");
-                            ui.label(local_kind(l.kind));
-                            ui.end_row();
-                            ui.label("Magnitude");
-                            ui.monospace(format!("{:.4}", l.magnitude));
-                            ui.end_row();
-                            ui.label("Obscuration");
-                            ui.monospace(format!("{:.2} %", l.obscuration * 100.0));
-                            ui.end_row();
-                            ui.label("Moon/Sun diameter ratio");
-                            ui.monospace(format!("{:.4}", l.moon_sun_ratio));
-                            ui.end_row();
-                            if let (Some(c2), Some(c3)) = (l.c2, l.c3) {
-                                ui.label(format!("Duration of {}", local_kind(l.kind)));
-                                ui.monospace(format::duration_min((c3.jd_tt - c2.jd_tt) * 1440.0));
-                                ui.end_row();
-                            }
-                            ui.label("Duration (C1–C4)");
-                            ui.monospace(format::duration_min((l.c4.jd_tt - l.c1.jd_tt) * 1440.0));
-                            ui.end_row();
-                        });
-                    if l.max.sun.alt <= 0.0 {
-                        ui.colored_label(
-                            ui.visuals().warn_fg_color,
-                            "The Sun is below the horizon at maximum.",
-                        );
-                    }
-                }
+    ui.heading(&item.label);
+    if let Some(d) = &item.solar {
+        egui::Grid::new("solar_details")
+            .num_columns(2)
+            .show(ui, |ui| {
+                ui.label("Greatest eclipse");
+                link(ui, &item.greatest);
+                ui.end_row();
+                ui.label("γ");
+                ui.monospace(format!("{:+.4}", item.gamma));
+                ui.end_row();
+                ui.label("Magnitude");
+                ui.monospace(format!("{:.4}", item.magnitude));
+                ui.end_row();
+                ui.label("Central");
+                ui.label(if d.central { "yes" } else { "no" });
+                ui.end_row();
+                ui.label("Point of greatest eclipse");
+                ui.label(crate::location::format_lat_lon(
+                    d.greatest_lat_deg,
+                    d.greatest_lon_deg,
+                ));
+                ui.end_row();
+                ui.label("Sun altitude there");
+                ui.monospace(format!("{:.1}°", d.sun_alt_deg));
+                ui.end_row();
+            });
+        ui.add_space(8.0);
+        ui.strong(format!("Local circumstances — {location}"));
+        match &d.local {
+            None => {
+                ui.label("No phase of this eclipse reaches the observer.");
             }
-        }
-        EclipseItem::Lunar {
-            details: d,
-            contacts,
-        } => {
-            egui::Grid::new("lunar_details")
-                .num_columns(2)
-                .show(ui, |ui| {
-                    ui.label("Greatest eclipse");
-                    link(ui, Instant::from_jd_tt(d.jd_tt));
-                    ui.end_row();
-                    ui.label("γ");
-                    ui.monospace(format!("{:+.4}", d.gamma));
-                    ui.end_row();
-                    ui.label("Umbral magnitude");
-                    ui.monospace(format!("{:.4}", d.umbral_magnitude));
-                    ui.end_row();
-                    ui.label("Penumbral magnitude");
-                    ui.monospace(format!("{:.4}", d.penumbral_magnitude));
-                    ui.end_row();
-                    for (label, m) in [
-                        ("Penumbral duration", d.penumbral_duration_min()),
-                        ("Partial duration", d.partial_duration_min()),
-                        ("Total duration", d.total_duration_min()),
-                    ] {
-                        if let Some(m) = m {
+            Some(l) => {
+                egui::Grid::new("solar_local")
+                    .striped(true)
+                    .num_columns(4)
+                    .show(ui, |ui| {
+                        for h in ["Contact", "Time", "Sun alt", "Sun az"] {
+                            ui.strong(h);
+                        }
+                        ui.end_row();
+                        let rows: [(&str, Option<&SolarContactDto>); 5] = [
+                            ("C1 partial begins", Some(&l.c1)),
+                            ("C2 central begins", l.c2.as_ref()),
+                            ("Maximum", Some(&l.max)),
+                            ("C3 central ends", l.c3.as_ref()),
+                            ("C4 partial ends", Some(&l.c4)),
+                        ];
+                        for (label, c) in rows {
+                            let Some(c) = c else { continue };
                             ui.label(label);
+                            link(ui, &c.time);
+                            let alt = c.sun_alt_deg;
+                            let text = format!("{alt:+.1}°");
+                            if alt < 0.0 {
+                                ui.colored_label(ui.visuals().warn_fg_color, text)
+                                    .on_hover_text("Sun below the horizon");
+                            } else {
+                                ui.monospace(text);
+                            }
+                            ui.monospace(format!("{:.1}°", c.sun_az_deg));
+                            ui.end_row();
+                        }
+                    });
+                egui::Grid::new("solar_local_values")
+                    .num_columns(2)
+                    .show(ui, |ui| {
+                        ui.label("Local type");
+                        ui.label(&l.kind);
+                        ui.end_row();
+                        ui.label("Magnitude");
+                        ui.monospace(format!("{:.4}", l.magnitude));
+                        ui.end_row();
+                        ui.label("Obscuration");
+                        ui.monospace(format!("{:.2} %", l.obscuration * 100.0));
+                        ui.end_row();
+                        ui.label("Moon/Sun diameter ratio");
+                        ui.monospace(format!("{:.4}", l.moon_sun_ratio));
+                        ui.end_row();
+                        if let Some(m) = l.central_duration_min {
+                            ui.label(format!("Duration of {}", l.kind));
                             ui.monospace(format::duration_min(m));
                             ui.end_row();
                         }
-                    }
-                    ui.label("Moon in zenith at");
-                    ui.label(crate::location::format_lat_lon(
-                        d.zenith_lat_deg,
-                        d.zenith_lon_deg,
-                    ));
-                    ui.end_row();
-                });
-            ui.add_space(8.0);
-            ui.strong(format!("Contacts — {location}"));
-            egui::Grid::new("lunar_contacts")
-                .striped(true)
-                .num_columns(4)
-                .show(ui, |ui| {
-                    for h in ["Contact", "Time", "Moon alt", "Visible"] {
-                        ui.strong(h);
-                    }
-                    ui.end_row();
-                    for c in contacts {
-                        ui.label(c.label);
-                        link(ui, c.time);
-                        ui.monospace(format!("{:+.1}°", c.alt / DEG));
-                        if c.above {
-                            ui.label("above horizon");
-                        } else {
-                            ui.colored_label(ui.visuals().warn_fg_color, "below horizon");
-                        }
+                        ui.label("Duration (C1–C4)");
+                        ui.monospace(format::duration_min(l.duration_min));
+                        ui.end_row();
+                    });
+                if l.max.sun_alt_deg <= 0.0 {
+                    ui.colored_label(
+                        ui.visuals().warn_fg_color,
+                        "The Sun is below the horizon at maximum.",
+                    );
+                }
+            }
+        }
+    } else if let Some(d) = &item.lunar {
+        egui::Grid::new("lunar_details")
+            .num_columns(2)
+            .show(ui, |ui| {
+                ui.label("Greatest eclipse");
+                link(ui, &item.greatest);
+                ui.end_row();
+                ui.label("γ");
+                ui.monospace(format!("{:+.4}", item.gamma));
+                ui.end_row();
+                ui.label("Umbral magnitude");
+                ui.monospace(format!("{:.4}", d.umbral_magnitude));
+                ui.end_row();
+                ui.label("Penumbral magnitude");
+                ui.monospace(format!("{:.4}", d.penumbral_magnitude));
+                ui.end_row();
+                for (label, m) in [
+                    ("Penumbral duration", d.penumbral_duration_min),
+                    ("Partial duration", d.partial_duration_min),
+                    ("Total duration", d.total_duration_min),
+                ] {
+                    if let Some(m) = m {
+                        ui.label(label);
+                        ui.monospace(format::duration_min(m));
                         ui.end_row();
                     }
-                });
-        }
+                }
+                ui.label("Moon in zenith at");
+                ui.label(crate::location::format_lat_lon(
+                    d.zenith_lat_deg,
+                    d.zenith_lon_deg,
+                ));
+                ui.end_row();
+            });
+        ui.add_space(8.0);
+        ui.strong(format!("Contacts — {location}"));
+        egui::Grid::new("lunar_contacts")
+            .striped(true)
+            .num_columns(4)
+            .show(ui, |ui| {
+                for h in ["Contact", "Time", "Moon alt", "Visible"] {
+                    ui.strong(h);
+                }
+                ui.end_row();
+                for c in &d.contacts {
+                    ui.label(contact_label(c));
+                    link(ui, &c.time);
+                    ui.monospace(
+                        c.moon_alt_deg
+                            .map_or_else(|| "—".into(), |a| format!("{a:+.1}°")),
+                    );
+                    if c.above_horizon == Some(true) {
+                        ui.label("above horizon");
+                    } else {
+                        ui.colored_label(ui.visuals().warn_fg_color, "below horizon");
+                    }
+                    ui.end_row();
+                }
+            });
     }
 }
 
@@ -614,12 +529,24 @@ mod tests {
 
     #[test]
     fn eclipses_of_2024_at_dallas() {
-        // 2024: annular-free list — total solar (Apr 8), annular solar
-        // (Oct 2), penumbral lunar (Mar 25), partial lunar (Sep 18).
+        // 2024: total solar (Apr 8), annular solar (Oct 2), penumbral lunar
+        // (Mar 25), partial lunar (Sep 18).
         let eph = MeeusEphemeris::new();
-        let dallas = GeoLocation::new(32.78, -96.80, 140.0);
-        let items = eclipse_items(&eph, 2024, 2024, EclipseFilter::Any, &dallas, |_| true).unwrap();
-        let kinds: Vec<String> = items.iter().map(EclipseItem::kind_label).collect();
+        let dallas = Location {
+            lat_deg: 32.78,
+            lon_deg: -96.80,
+            elevation_m: 140.0,
+        };
+        let items = eclipse_items(
+            &eph,
+            2024,
+            2024,
+            EclipseKindFilter::Any,
+            dallas,
+            &JobContext::detached(),
+        )
+        .unwrap();
+        let kinds: Vec<&str> = items.iter().map(|e| e.label.as_str()).collect();
         assert_eq!(
             kinds,
             [
@@ -633,29 +560,25 @@ mod tests {
         // about 18:42:40 UT (NASA: totality 18:40:44–18:44:39), a quarter
         // of an hour after local noon, so the Sun is near its meridian
         // altitude 90° − 32.8° + 7.5° ≈ 64.7°.
-        let EclipseItem::Solar { local: Some(l), .. } = &items[1] else {
-            panic!("no local circumstances")
-        };
-        assert_eq!(l.kind, LocalEclipseKind::Total);
+        let l = items[1].solar.as_ref().unwrap().local.as_ref().unwrap();
+        assert_eq!(l.kind, "total");
         assert!(l.obscuration > 0.999);
-        let max = Instant::from_jd_tt(l.max.jd_tt);
+        let max = instant(&l.max.time);
         let nasa = Instant::from_calendar(2024, 4, 8, 18, 42, 40.0);
         assert!((max.jd_ut - nasa.jd_ut).abs() * 86_400.0 < 60.0);
-        let (c2, c3) = (l.c2.unwrap(), l.c3.unwrap());
-        let totality_min = (c3.jd_tt - c2.jd_tt) * 1440.0;
+        let totality_min = l.central_duration_min.unwrap();
         assert!((totality_min - 3.92).abs() < 0.2, "{totality_min}");
-        let alt = l.max.sun.alt / DEG;
+        let alt = l.max.sun_alt_deg;
         assert!((63.5..64.7).contains(&alt), "{alt}");
+        assert!(summary(&items[1]).2.starts_with("total 1.0"));
         // The penumbral lunar eclipse of 2024 March 25 (greatest ≈ 07:13 UT)
         // is visible from Dallas (Moon high in the night sky).
-        let EclipseItem::Lunar { contacts, .. } = &items[0] else {
-            panic!()
-        };
-        let greatest = contacts
-            .iter()
-            .find(|c| c.label == "Greatest eclipse")
-            .unwrap();
-        assert!(greatest.above && greatest.alt > 30.0 * DEG);
+        let contacts = &items[0].lunar.as_ref().unwrap().contacts;
+        let greatest = contacts.iter().find(|c| c.code == "max").unwrap();
+        assert_eq!(contact_label(greatest), "Greatest eclipse");
+        assert_eq!(greatest.above_horizon, Some(true));
+        assert!(greatest.moon_alt_deg.unwrap() > 30.0);
         assert_eq!(contacts.len(), 3); // P1, greatest, P4
+        assert_eq!(summary(&items[0]).2, "Moon up throughout");
     }
 }

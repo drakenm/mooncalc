@@ -4,25 +4,26 @@
 //!
 //! [`ReportTab::poll`] recomputes in a background job whenever the observer,
 //! the local date, the time zone or the ephemeris changes
-//! ([`compute_report`]). Each sighting uses one interpolation table and set
-//! of conjunctions, evaluated once per distinct evaluation time (Yallop's
-//! best time, sunset, a Sun altitude), via
-//! `mooncalc_visibility::circumstances::compute_with`. The day is anchored at
+//! ([`compute_report`]). The computation is the shared service
+//! `mooncalc_app::report::location_report`, which the Tauri frontend uses
+//! too: each criterion at its own evaluation time, with the day anchored at
 //! **civil** noon in the user's time zone, so "the evening of 10 March" is
-//! the one a local observer means.
+//! the one a local observer means. This module words and lays out its
+//! [`LocationReport`].
 
-use mooncalc_atlas::Zone;
 use std::fmt::Write as _;
 
-use mooncalc_core::events::{ApparentTable, CalendarDate};
-use mooncalc_core::time::Instant;
-use mooncalc_core::{Ephemeris, GeoLocation};
-use mooncalc_visibility::circumstances::{
-    Circumstances, Outcome, Polar, Request, Settings as CircSettings, Sighting, compute_with,
-    new_moons_around,
+use mooncalc_app::dto::{
+    Crescent, CrescentGeometryDto, CrescentReport, CriterionVerdict, Location, LocationReport,
+    LocationReportParams, UtDateTime,
 };
-use mooncalc_visibility::criteria::{EvaluationTime, all};
-use mooncalc_visibility::{CriterionResult, ZoneInfo};
+use mooncalc_app::report::{COVERAGE_MARGIN_DAYS, location_report, status_from_code};
+use mooncalc_atlas::Zone;
+use mooncalc_core::Ephemeris;
+use mooncalc_core::events::CalendarDate;
+use mooncalc_core::time::Instant;
+use mooncalc_visibility::circumstances::Status;
+use mooncalc_visibility::criteria::EvaluationTime;
 
 use super::TabContext;
 use super::map::swatch;
@@ -36,6 +37,7 @@ use crate::settings::Settings;
 #[derive(Clone, Debug, PartialEq)]
 pub struct ReportKey {
     pub date: CalendarDate,
+    /// The app time zone (IANA or fixed).
     pub zone: Zone,
     pub name: String,
     pub lat_deg: f64,
@@ -62,137 +64,40 @@ impl ReportKey {
         self.zone.civil_noon(self.date)
     }
 
-    /// When the world map for this date shows another evening at the
-    /// observer's longitude (its date line is the 180° meridian): the note
-    /// naming the map date that shows this report's evening.
-    pub fn map_date_note(&self) -> Option<mooncalc_app::dto::MapDateNote> {
-        mooncalc_app::dateline::report_note(self.date, self.lon_deg, self.offset_hours())
-    }
-
-    /// The UTC offset at civil noon, hours.
-    pub fn offset_hours(&self) -> f64 {
-        self.zone.offset_hours(self.civil_noon().jd_ut)
-    }
-
-    /// The zone at civil noon for labels (`UTC+03:00`, `Europe/London, BST
-    /// (UTC+01:00)`).
-    pub fn zone_text(&self) -> String {
-        crate::datetime::zone_text(self.zone, self.civil_noon().jd_ut)
-    }
-}
-
-/// One criterion's verdict.
-#[derive(Clone, Debug)]
-pub struct CriterionRow {
-    pub id: &'static str,
-    pub name: &'static str,
-    pub evaluation: EvaluationTime,
-    pub zones: &'static [ZoneInfo],
-    pub outcome: Outcome,
-    pub result: Option<CriterionResult>,
-}
-
-impl CriterionRow {
-    pub fn zone(&self) -> Option<&'static ZoneInfo> {
-        self.result.and_then(|r| self.zones.get(r.zone))
+    /// The service request.
+    pub fn params(&self) -> LocationReportParams {
+        LocationReportParams {
+            date: self.date.into(),
+            // The IANA zone when there is one; the offset at civil noon is
+            // the fixed fallback (and the offset of a fixed zone).
+            tz_offset_hours: self.zone.offset_hours(self.civil_noon().jd_ut),
+            time_zone: self.zone.iana_name().map(str::to_owned),
+            location: Location {
+                lat_deg: self.lat_deg,
+                lon_deg: self.lon_deg,
+                elevation_m: self.elevation_m,
+            },
+            ephemeris_id: None,
+        }
     }
 }
 
-/// The evening or the morning.
-#[derive(Clone, Debug)]
-pub struct SightingReport {
-    pub sighting: Sighting,
-    /// At Yallop's best time.
-    pub best: Outcome,
-    /// At sunset (sunrise): shown when the best time is undefined.
-    pub at_sun_event: Outcome,
-    /// The new Moon nearest the day.
-    pub conjunction: Instant,
-    pub rows: Vec<CriterionRow>,
-}
-
-impl SightingReport {
-    /// The circumstances to tabulate: the best time's, else the Sun event's.
-    pub fn circumstances(&self) -> Option<&Circumstances> {
-        self.best
-            .circumstances()
-            .or_else(|| self.at_sun_event.circumstances())
-    }
-}
-
-/// A complete report.
+/// A complete report: the request and the service's answer.
 #[derive(Clone, Debug)]
 pub struct ReportData {
     pub key: ReportKey,
-    pub evening: SightingReport,
-    pub morning: SightingReport,
+    pub report: LocationReport,
 }
 
-/// Compute the report for `key`.
+/// Compute the report for `key` (`mooncalc_app::report::location_report`).
 pub fn compute_report(
     key: ReportKey,
     eph: &dyn Ephemeris,
     job: &JobContext,
 ) -> Result<ReportData, JobError> {
-    let noon = key.civil_noon();
-    let location = GeoLocation::new(key.lat_deg, key.lon_deg, key.elevation_m);
-    let table = ApparentTable::with_default_step(eph, noon.add_days(-2.0), noon.add_days(2.0));
-    let new_moons = new_moons_around(eph, noon);
-    let conjunction = *new_moons
-        .iter()
-        .min_by(|a, b| {
-            (a.jd_ut - noon.jd_ut)
-                .abs()
-                .total_cmp(&(b.jd_ut - noon.jd_ut).abs())
-        })
-        .unwrap_or(&noon);
-    let criteria = all();
-    let sighting_report = |sighting: Sighting| -> Result<SightingReport, JobError> {
-        let mut cache: Vec<(EvaluationTime, Outcome)> = Vec::new();
-        let mut outcome = |evaluation: EvaluationTime| -> Outcome {
-            if let Some((_, o)) = cache.iter().find(|(e, _)| *e == evaluation) {
-                return *o;
-            }
-            let req = Request {
-                location,
-                noon,
-                sighting,
-                evaluation,
-            };
-            let o = compute_with(&table, &new_moons, &req, &CircSettings::default());
-            cache.push((evaluation, o));
-            o
-        };
-        let best = outcome(EvaluationTime::YallopBestTime);
-        let at_sun_event = outcome(EvaluationTime::Sunset);
-        let mut rows = Vec::with_capacity(criteria.len());
-        for c in &criteria {
-            job.checkpoint()?;
-            let o = outcome(c.evaluation_time());
-            rows.push(CriterionRow {
-                id: c.id(),
-                name: c.name(),
-                evaluation: c.evaluation_time(),
-                zones: c.zones(),
-                outcome: o,
-                result: o.evaluate(c.as_ref()),
-            });
-        }
-        Ok(SightingReport {
-            sighting,
-            best,
-            at_sun_event,
-            conjunction,
-            rows,
-        })
-    };
-    let evening = sighting_report(Sighting::Evening)?;
-    let morning = sighting_report(Sighting::Morning)?;
-    Ok(ReportData {
-        key,
-        evening,
-        morning,
-    })
+    job.checkpoint()?;
+    let report = location_report(eph, &key.params()).map_err(|e| JobError::Failed(e.message))?;
+    Ok(ReportData { key, report })
 }
 
 /// How serious an outcome is, for colouring.
@@ -203,151 +108,179 @@ pub enum Tone {
     Bad,
 }
 
-fn sun_event(s: Sighting) -> &'static str {
-    match s {
-        Sighting::Evening => "sunset",
-        Sighting::Morning => "sunrise",
+fn sun_event(c: Crescent) -> &'static str {
+    match c {
+        Crescent::Evening => "sunset",
+        Crescent::Morning => "sunrise",
     }
 }
 
-/// A sentence describing an outcome.
-pub fn outcome_text(o: &Outcome, s: Sighting) -> (String, Tone) {
-    let evening = s == Sighting::Evening;
-    match o {
-        Outcome::Crescent(c) => (
+fn jd(t: &UtDateTime) -> f64 {
+    t.to_instant().jd_ut
+}
+
+/// The lag, minutes (infinite where the Moon does not set or rise).
+fn lag(g: Option<&CrescentGeometryDto>) -> f64 {
+    g.map_or(f64::NAN, |g| g.lag_minutes.unwrap_or(f64::INFINITY))
+}
+
+fn age(g: Option<&CrescentGeometryDto>) -> f64 {
+    g.map_or(f64::NAN, |g| g.age_hours)
+}
+
+/// A sentence describing the evening (morning) at Yallop's best time.
+pub fn outcome_text(c: &CrescentReport) -> (String, Tone) {
+    let evening = c.crescent == Crescent::Evening;
+    let g = c.geometry.as_ref();
+    let Some(status) = status_from_code(&c.status) else {
+        return (c.status_text.clone(), Tone::Warn);
+    };
+    match status {
+        Status::Crescent => (
             if evening {
                 format!(
                     "The crescent can be looked for after sunset: the Moon sets {} after the Sun, {} after the new Moon.",
-                    fmt_minutes(c.geometry.lag_minutes),
-                    fmt_hours(c.geometry.age_hours)
+                    fmt_minutes(lag(g)),
+                    fmt_hours(age(g))
                 )
             } else {
                 format!(
                     "The old crescent can be looked for before sunrise: the Moon rises {} before the Sun, {} before the new Moon.",
-                    fmt_minutes(c.geometry.lag_minutes),
-                    fmt_hours(c.geometry.age_hours)
+                    fmt_minutes(lag(g)),
+                    fmt_hours(age(g))
                 )
             },
             Tone::Good,
         ),
-        Outcome::BeforeConjunction(c) => (
+        Status::BeforeConjunction => (
             if evening {
                 format!(
                     "No crescent: the Moon sets after the Sun, but the new Moon has not happened yet at the best time ({} to go).",
-                    fmt_hours(-c.geometry.age_hours)
+                    fmt_hours(-age(g))
                 )
             } else {
                 format!(
                     "No old crescent: the Moon rises before the Sun, but the new Moon has already happened ({} ago).",
-                    fmt_hours(-c.geometry.age_hours)
+                    fmt_hours(-age(g))
                 )
             },
             Tone::Bad,
         ),
-        Outcome::MoonSetsFirst(c) => (
+        Status::MoonSetsFirst => (
             if evening {
                 format!(
                     "No crescent: the Moon sets before the Sun (lag {}).",
-                    fmt_minutes(c.geometry.lag_minutes)
+                    fmt_minutes(lag(g))
                 )
             } else {
                 format!(
                     "No old crescent: the Moon rises after the Sun (lag {}).",
-                    fmt_minutes(c.geometry.lag_minutes)
+                    fmt_minutes(lag(g))
                 )
             },
             Tone::Bad,
         ),
-        Outcome::MoonAlwaysUp { .. } => (
+        Status::MoonAlwaysUp => (
             format!(
                 "The Moon does not {} within 12 hours of {}; Yallop's best time is undefined (criteria evaluated at {} still apply).",
                 if evening { "set" } else { "rise" },
-                sun_event(s),
-                sun_event(s)
+                sun_event(c.crescent),
+                sun_event(c.crescent)
             ),
             Tone::Warn,
         ),
-        Outcome::MoonAlwaysDown { .. } => (
+        Status::MoonAlwaysDown => (
             "No crescent: the Moon stays below the horizon all day.".into(),
             Tone::Bad,
         ),
-        Outcome::NoSunEvent(Polar::MidnightSun) => (
+        Status::MidnightSun => (
             format!(
                 "Polar day: the Sun does not {} on this date.",
                 if evening { "set" } else { "rise" }
             ),
             Tone::Warn,
         ),
-        Outcome::NoSunEvent(Polar::PolarNight) => (
+        Status::PolarNight => (
             "Polar night: the Sun stays below the horizon on this date.".into(),
             Tone::Warn,
         ),
-        Outcome::SunAltitudeNotReached { .. } => (
+        Status::SunAltitudeNotReached => (
             "The Sun does not reach the criterion's evaluation altitude within 12 hours.".into(),
             Tone::Warn,
         ),
-        Outcome::OutsideEphemeris => (
+        Status::OutsideEphemeris => (
             "Not computed: the date is outside the ephemeris coverage.".into(),
             Tone::Warn,
         ),
     }
 }
 
-/// Short reason for a criterion without a verdict.
-fn no_verdict_reason(o: &Outcome, s: Sighting) -> &'static str {
-    let evening = s == Sighting::Evening;
-    match o {
-        Outcome::Crescent(_) => "—",
-        Outcome::BeforeConjunction(_) if evening => "before new Moon",
-        Outcome::BeforeConjunction(_) => "after new Moon",
-        Outcome::MoonSetsFirst(_) if evening => "Moon sets first",
-        Outcome::MoonSetsFirst(_) => "Moon rises after Sun",
-        Outcome::MoonAlwaysUp { .. } => "best time undefined",
-        Outcome::MoonAlwaysDown { .. } => "Moon always down",
-        Outcome::NoSunEvent(Polar::MidnightSun) => "polar day",
-        Outcome::NoSunEvent(Polar::PolarNight) => "polar night",
-        Outcome::SunAltitudeNotReached { .. } => "Sun altitude not reached",
-        Outcome::OutsideEphemeris => "outside ephemeris",
+/// Short reason for a criterion without a verdict, from the status at its
+/// evaluation time.
+fn no_verdict_reason(v: &CriterionVerdict, crescent: Crescent) -> &'static str {
+    let evening = crescent == Crescent::Evening;
+    match status_from_code(&v.status) {
+        None | Some(Status::Crescent) => "—",
+        Some(Status::BeforeConjunction) if evening => "before new Moon",
+        Some(Status::BeforeConjunction) => "after new Moon",
+        Some(Status::MoonSetsFirst) if evening => "Moon sets first",
+        Some(Status::MoonSetsFirst) => "Moon rises after Sun",
+        Some(Status::MoonAlwaysUp) => "best time undefined",
+        Some(Status::MoonAlwaysDown) => "Moon always down",
+        Some(Status::MidnightSun) => "polar day",
+        Some(Status::PolarNight) => "polar night",
+        Some(Status::SunAltitudeNotReached) => "Sun altitude not reached",
+        Some(Status::OutsideEphemeris) => "outside ephemeris",
     }
 }
 
-fn evaluation_label(e: EvaluationTime, s: Sighting) -> String {
-    match e {
-        EvaluationTime::YallopBestTime => "best time".into(),
-        EvaluationTime::Sunset => sun_event(s).into(),
-        EvaluationTime::SunAltitude(a) => format!("Sun at {a:+.1}°"),
+/// The criterion's evaluation-time rule, short: "best time", "sunset" or
+/// "sunrise", "Sun at -4.0°".
+fn evaluation_label(v: &CriterionVerdict, crescent: Crescent) -> String {
+    match mooncalc_app::criteria::get(&v.criterion_id).map(|c| c.evaluation_time()) {
+        Ok(EvaluationTime::YallopBestTime) => "best time".into(),
+        Ok(EvaluationTime::Sunset) => sun_event(crescent).into(),
+        Ok(EvaluationTime::SunAltitude(a)) => format!("Sun at {a:+.1}°"),
+        Err(_) => v.evaluation_time.clone(),
     }
 }
 
-fn heading(s: Sighting) -> &'static str {
-    match s {
-        Sighting::Evening => "Evening crescent (after sunset)",
-        Sighting::Morning => "Morning crescent (before sunrise)",
+fn value_text(v: &CriterionVerdict) -> String {
+    v.verdict
+        .as_ref()
+        .and_then(|z| z.value)
+        .map_or_else(String::new, |v| format!("{v:+.3}"))
+}
+
+fn heading(c: Crescent) -> &'static str {
+    match c {
+        Crescent::Evening => "Evening crescent (after sunset)",
+        Crescent::Morning => "Morning crescent (before sunrise)",
     }
 }
 
 /// The circumstance rows: (label, value).
-fn circumstance_rows(r: &SightingReport, key: &ReportKey) -> Vec<(String, String)> {
-    let tz = key.zone;
-    let d = Some((key.date.year, key.date.month, key.date.day));
-    let t = |jd: f64| fmt_local_ut(jd, tz, d);
-    let evening = r.sighting == Sighting::Evening;
+fn circumstance_rows(r: &CrescentReport, report: &LocationReport) -> Vec<(String, String)> {
+    let tz = report_zone(report);
+    let d = Some((report.date.year, report.date.month, report.date.day));
+    let t = |u: &UtDateTime| fmt_local_ut(jd(u), tz, d);
+    let new_moon = r
+        .conjunction
+        .as_ref()
+        .map_or_else(|| "—".into(), |c| fmt_local_ut(jd(c), tz, None));
+    let evening = r.crescent == Crescent::Evening;
     let mut rows = Vec::new();
-    let Some(c) = r.circumstances() else {
-        rows.push((
-            "New Moon".into(),
-            fmt_local_ut(r.conjunction.jd_ut, tz, None),
-        ));
+    let Some(g) = &r.geometry else {
+        rows.push(("New Moon".into(), new_moon));
         return rows;
     };
-    let g = &c.geometry;
     rows.push((
         if evening { "Sunset" } else { "Sunrise" }.into(),
-        t(c.sun_event.jd_ut),
+        r.sun_event.as_ref().map_or_else(|| "—".into(), t),
     ));
     rows.push((
         if evening { "Moonset" } else { "Moonrise" }.into(),
-        c.moon_event.map_or_else(
+        r.moon_event.as_ref().map_or_else(
             || {
                 if evening {
                     "does not set".into()
@@ -355,15 +288,11 @@ fn circumstance_rows(r: &SightingReport, key: &ReportKey) -> Vec<(String, String
                     "does not rise".into()
                 }
             },
-            |m| t(m.jd_ut),
+            t,
         ),
     ));
-    rows.push(("Lag".into(), fmt_minutes(g.lag_minutes)));
-    rows.push((
-        "New Moon".into(),
-        fmt_local_ut(c.conjunction.jd_ut, tz, None),
-    ));
-    let at_best = r.best.circumstances().is_some();
+    rows.push(("Lag".into(), fmt_minutes(lag(Some(g)))));
+    rows.push(("New Moon".into(), new_moon));
     rows.push((
         if evening {
             "Moon age"
@@ -374,12 +303,12 @@ fn circumstance_rows(r: &SightingReport, key: &ReportKey) -> Vec<(String, String
         fmt_hours(g.age_hours),
     ));
     rows.push((
-        if at_best {
-            "Best time (Yallop)".into()
+        if r.geometry_at_sun_event {
+            format!("Evaluated at {}", sun_event(r.crescent))
         } else {
-            format!("Evaluated at {}", sun_event(r.sighting))
+            "Best time (Yallop)".into()
         },
-        t(c.evaluation.jd_ut),
+        r.geometry_at.as_ref().map_or_else(|| "—".into(), t),
     ));
     rows.push((
         "Illuminated".into(),
@@ -423,35 +352,50 @@ fn circumstance_rows(r: &SightingReport, key: &ReportKey) -> Vec<(String, String
     rows
 }
 
+/// The zone a report was computed in (its times also carry their offsets).
+fn report_zone(r: &LocationReport) -> Zone {
+    Zone::iana_or_fixed(r.time_zone.as_deref(), r.tz_offset_hours)
+}
+
+/// The report's zone at civil noon: `UTC+03:00`, `Europe/London, BST
+/// (UTC+01:00)`.
+fn zone_text(r: &LocationReport) -> String {
+    let offset = crate::datetime::format_utc_offset(r.tz_offset_hours);
+    match &r.time_zone {
+        None => offset,
+        Some(name) if r.zone_abbreviation.chars().all(|c| c.is_ascii_alphabetic()) => {
+            format!("{name}, {} ({offset})", r.zone_abbreviation)
+        }
+        Some(name) => format!("{name}, {offset}"),
+    }
+}
+
+fn date_text(r: &LocationReport) -> String {
+    format!("{:04}-{:02}-{:02}", r.date.year, r.date.month, r.date.day)
+}
+
 /// The whole report as plain text (File → Copy report as text).
 pub fn report_text(data: &ReportData) -> String {
-    let k = &data.key;
+    let r = &data.report;
     let mut out = String::new();
     let _ = writeln!(out, "MoonCalc-rs crescent visibility report");
     let _ = writeln!(
         out,
         "Location: {} ({}, {:.0} m)",
-        k.name,
-        format_lat_lon(k.lat_deg, k.lon_deg),
-        k.elevation_m
+        data.key.name,
+        format_lat_lon(r.location.lat_deg, r.location.lon_deg),
+        r.location.elevation_m
     );
-    let _ = writeln!(
-        out,
-        "Date: {:04}-{:02}-{:02} (local, {})",
-        k.date.year,
-        k.date.month,
-        k.date.day,
-        k.zone_text()
-    );
-    let _ = writeln!(out, "Ephemeris: {}", k.ephemeris);
-    if let Some(n) = k.map_date_note() {
+    let _ = writeln!(out, "Date: {} (local, {})", date_text(r), zone_text(r));
+    let _ = writeln!(out, "Ephemeris: {}", r.ephemeris);
+    if let Some(n) = &r.map_date_note {
         let _ = writeln!(out, "Note: {}", n.text);
     }
-    for r in [&data.evening, &data.morning] {
+    for c in [&r.evening, &r.morning] {
         let _ = writeln!(out);
-        let _ = writeln!(out, "== {} ==", heading(r.sighting));
-        let _ = writeln!(out, "{}", outcome_text(&r.best, r.sighting).0);
-        for (label, value) in circumstance_rows(r, k) {
+        let _ = writeln!(out, "== {} ==", heading(c.crescent));
+        let _ = writeln!(out, "{}", outcome_text(c).0);
+        for (label, value) in circumstance_rows(c, r) {
             let _ = writeln!(out, "  {label:<20} {value}");
         }
         let _ = writeln!(out);
@@ -460,25 +404,18 @@ pub fn report_text(data: &ReportData) -> String {
             "  {:<34} {:<14} {:<5} {:>9}  Description",
             "Criterion", "Evaluated at", "Zone", "Value"
         );
-        for row in &r.rows {
-            let (code, desc) = match row.zone() {
-                Some(z) => (z.code.to_owned(), z.description.to_owned()),
-                None => (
-                    "—".into(),
-                    no_verdict_reason(&row.outcome, r.sighting).into(),
-                ),
+        for v in &c.criteria {
+            let (code, desc) = match &v.verdict {
+                Some(z) => (z.code.as_str(), z.description.as_str()),
+                None => ("—", no_verdict_reason(v, c.crescent)),
             };
-            let value = row
-                .result
-                .and_then(|r| r.value)
-                .map_or_else(String::new, |v| format!("{v:+.3}"));
             let _ = writeln!(
                 out,
                 "  {:<34} {:<14} {:<5} {:>9}  {}",
-                row.name,
-                evaluation_label(row.evaluation, r.sighting),
+                v.name,
+                evaluation_label(v, c.crescent),
                 code,
-                value,
+                value_text(v),
                 desc
             );
         }
@@ -511,7 +448,10 @@ impl ReportTab {
         let key = ReportKey::from_settings(tc.settings, &active);
         if self.submitted.as_ref() != Some(&key) {
             self.submitted = Some(key.clone());
-            if let Some(problem) = active.coverage_problem(key.civil_noon().jd_ut, 3.0) {
+            let noon = key.civil_noon().jd_ut;
+            if let Some(problem) =
+                active.span_problem(noon, noon, COVERAGE_MARGIN_DAYS, COVERAGE_MARGIN_DAYS)
+            {
                 self.job.cancel();
                 self.error = Some(problem);
             } else {
@@ -549,24 +489,19 @@ impl ReportTab {
             }
             return;
         };
-        let k = &data.key;
+        let r = &data.report;
+        let offset = zone_text(r);
         ui.horizontal_wrapped(|ui| {
             ui.heading("Location report");
             ui.separator();
             ui.label(format!(
                 "{} — {}, {:.0} m",
-                k.name,
-                format_lat_lon(k.lat_deg, k.lon_deg),
-                k.elevation_m
+                data.key.name,
+                format_lat_lon(r.location.lat_deg, r.location.lon_deg),
+                r.location.elevation_m
             ));
             ui.separator();
-            ui.label(format!(
-                "{:04}-{:02}-{:02} (local date, {})",
-                k.date.year,
-                k.date.month,
-                k.date.day,
-                k.zone_text()
-            ));
+            ui.label(format!("{} (local date, {offset})", date_text(r)));
             ui.separator();
             if ui.button("Copy as text").clicked() {
                 ui.ctx().copy_text(report_text(data));
@@ -574,12 +509,11 @@ impl ReportTab {
             }
         });
         ui.weak(format!(
-            "Ephemeris: {}. Times are local ({}) with UT in brackets. Rise/set use the \
+            "Ephemeris: {}. Times are local ({offset}) with UT in brackets. Rise/set use the \
              standard horizon (upper limb, 34′ refraction).",
-            k.ephemeris,
-            k.zone_text()
+            r.ephemeris,
         ));
-        if let Some(n) = k.map_date_note() {
+        if let Some(n) = &r.map_date_note {
             ui.add(
                 egui::Label::new(
                     egui::RichText::new(format!("Map date: {}", n.text))
@@ -592,26 +526,26 @@ impl ReportTab {
         egui::ScrollArea::vertical().show(ui, |ui| {
             if ui.available_width() > 1100.0 {
                 ui.columns(2, |cols| {
-                    sighting_ui(&mut cols[0], &data.evening, k);
-                    sighting_ui(&mut cols[1], &data.morning, k);
+                    crescent_ui(&mut cols[0], &r.evening, r);
+                    crescent_ui(&mut cols[1], &r.morning, r);
                 });
             } else {
-                sighting_ui(ui, &data.evening, k);
+                crescent_ui(ui, &r.evening, r);
                 ui.add_space(12.0);
-                sighting_ui(ui, &data.morning, k);
+                crescent_ui(ui, &r.morning, r);
             }
         });
     }
 }
 
-fn sighting_ui(ui: &mut egui::Ui, r: &SightingReport, key: &ReportKey) {
-    let id = match r.sighting {
-        Sighting::Evening => "evening",
-        Sighting::Morning => "morning",
+fn crescent_ui(ui: &mut egui::Ui, c: &CrescentReport, report: &LocationReport) {
+    let id = match c.crescent {
+        Crescent::Evening => "evening",
+        Crescent::Morning => "morning",
     };
     ui.push_id(id, |ui| {
-        ui.heading(heading(r.sighting));
-        let (text, tone) = outcome_text(&r.best, r.sighting);
+        ui.heading(heading(c.crescent));
+        let (text, tone) = outcome_text(c);
         let color = match tone {
             Tone::Good => egui::Color32::from_rgb(40, 160, 70),
             Tone::Warn => ui.visuals().warn_fg_color,
@@ -624,7 +558,7 @@ fn sighting_ui(ui: &mut egui::Ui, r: &SightingReport, key: &ReportKey) {
             .spacing([12.0, 3.0])
             .striped(true)
             .show(ui, |ui| {
-                for (label, value) in circumstance_rows(r, key) {
+                for (label, value) in circumstance_rows(c, report) {
                     ui.label(label);
                     ui.monospace(value);
                     ui.end_row();
@@ -643,26 +577,22 @@ fn sighting_ui(ui: &mut egui::Ui, r: &SightingReport, key: &ReportKey) {
                 ui.weak("Value");
                 ui.weak("Description");
                 ui.end_row();
-                for row in &r.rows {
-                    ui.label(row.name);
-                    ui.weak(evaluation_label(row.evaluation, r.sighting));
-                    match row.zone() {
+                for v in &c.criteria {
+                    ui.label(&v.name);
+                    ui.weak(evaluation_label(v, c.crescent));
+                    match &v.verdict {
                         Some(z) => {
                             ui.horizontal(|ui| {
                                 swatch(ui, z.rgb);
-                                ui.strong(z.code);
+                                ui.strong(&z.code);
                             });
-                            ui.monospace(
-                                row.result
-                                    .and_then(|r| r.value)
-                                    .map_or_else(String::new, |v| format!("{v:+.3}")),
-                            );
-                            ui.add(egui::Label::new(z.description).wrap());
+                            ui.monospace(value_text(v));
+                            ui.add(egui::Label::new(&z.description).wrap());
                         }
                         None => {
                             ui.label("—");
                             ui.label("");
-                            ui.weak(no_verdict_reason(&row.outcome, r.sighting));
+                            ui.weak(no_verdict_reason(v, c.crescent));
                         }
                     }
                     ui.end_row();
@@ -688,30 +618,40 @@ mod tests {
         }
     }
 
+    fn report(k: ReportKey) -> ReportData {
+        compute_report(k, &MeeusEphemeris::new(), &JobContext::detached()).unwrap()
+    }
+
     #[test]
     fn march_2024_evening_crescent_in_the_americas() {
         // New Moon 2024-03-10 09:00 UT: the evening crescent is visible
         // from Honolulu that evening (Yallop A/B, as on HMNAO's map), and
         // there is no old crescent that morning.
-        let eph = MeeusEphemeris::new();
-        let d = compute_report(
-            key(21.31, -157.86, CalendarDate::new(2024, 3, 10), -10.0),
-            &eph,
-            &JobContext::detached(),
-        )
-        .unwrap();
-        assert!(matches!(d.evening.best, Outcome::Crescent(_)));
-        let yallop = d.evening.rows.iter().find(|r| r.id == "yallop").unwrap();
+        let d = report(key(21.31, -157.86, CalendarDate::new(2024, 3, 10), -10.0));
+        let r = &d.report;
+        assert_eq!(r.evening.status, "crescent");
+        assert_eq!(outcome_text(&r.evening).1, Tone::Good);
+        let yallop = r
+            .evening
+            .criteria
+            .iter()
+            .find(|v| v.criterion_id == "yallop")
+            .unwrap();
         assert!(
             yallop
-                .zone()
+                .verdict
+                .as_ref()
                 .is_some_and(|z| z.code == "A" || z.code == "B")
         );
-        assert_eq!(d.evening.rows.len(), all().len());
-        assert!(!matches!(d.morning.best, Outcome::Crescent(_)));
+        assert_eq!(
+            r.evening.criteria.len(),
+            mooncalc_visibility::criteria::all().len()
+        );
+        assert_ne!(r.morning.status, "crescent");
         let text = report_text(&d);
         assert!(text.contains("Yallop") && text.contains("Sunset"));
         assert!(text.contains("UTC-10:00"));
+        assert!(text.contains("Best time (Yallop)"));
     }
 
     #[test]
@@ -719,38 +659,51 @@ mod tests {
         // Apia (UTC+13, 171.8° W): the civil evening of 2024-03-10 is
         // "Moon sets first"; the map for 2024-03-10 shows the next evening
         // there, so the report points to the map for 2024-03-09.
-        let eph = MeeusEphemeris::new();
-        let k = key(-13.8333, -171.7667, CalendarDate::new(2024, 3, 10), 13.0);
-        let note = k.map_date_note().expect("note");
+        let d = report(key(
+            -13.8333,
+            -171.7667,
+            CalendarDate::new(2024, 3, 10),
+            13.0,
+        ));
+        let note = d.report.map_date_note.as_ref().expect("note");
         assert_eq!(note.day_shift, -1);
-        let d = compute_report(k, &eph, &JobContext::detached()).unwrap();
-        assert!(matches!(d.evening.best, Outcome::MoonSetsFirst(_)));
+        assert_eq!(d.report.evening.status, "moon-sets-first");
         assert!(report_text(&d).contains("The world map for 2024-03-09"));
         // London: no note.
-        let london = key(51.5, -0.13, CalendarDate::new(2024, 3, 10), 0.0);
-        assert!(london.map_date_note().is_none());
+        let london = report(key(51.5, -0.13, CalendarDate::new(2024, 3, 10), 0.0));
+        assert!(london.report.map_date_note.is_none());
     }
 
     #[test]
     fn polar_night_is_reported() {
-        let eph = MeeusEphemeris::new();
-        let d = compute_report(
-            key(85.0, 0.0, CalendarDate::new(2024, 12, 31), 0.0),
-            &eph,
-            &JobContext::detached(),
-        )
-        .unwrap();
-        assert!(matches!(
-            d.evening.best,
-            Outcome::NoSunEvent(Polar::PolarNight)
-        ));
-        assert!(d.evening.rows.iter().all(|r| r.result.is_none()));
-        assert!(
-            outcome_text(&d.evening.best, Sighting::Evening)
-                .0
-                .contains("Polar night")
-        );
+        let d = report(key(85.0, 0.0, CalendarDate::new(2024, 12, 31), 0.0));
+        let e = &d.report.evening;
+        assert_eq!(e.status, "polar-night");
+        assert!(e.criteria.iter().all(|v| v.verdict.is_none()));
+        assert!(outcome_text(e).0.contains("Polar night"));
         // The text report still lists the conjunction.
-        assert!(report_text(&d).contains("New Moon"));
+        let text = report_text(&d);
+        assert!(text.contains("New Moon             2024-12-30"), "{text}");
+        assert!(text.contains("polar night"));
+    }
+
+    #[test]
+    fn moon_always_up_shows_the_sunset_circumstances() {
+        // Tromsø, 2025-04-01: the young Moon does not set; the criteria
+        // evaluated at sunset still give verdicts, Yallop does not.
+        let mut k = key(69.65, 18.96, CalendarDate::new(2025, 4, 1), 2.0);
+        k.name = "Tromso".into();
+        let text = report_text(&report(k));
+        for want in [
+            "Yallop's best time is undefined",
+            "Moonset              does not set",
+            "Lag                  ∞",
+            "Evaluated at sunset  19:50:33 UTC+02:00 (17:50:33 UT)",
+            "Yallop (1997)                      best time      —                best time undefined",
+            "SAAO (Caldwell & Laney 2001)       sunset         A       +26.928",
+            "Evaluated at sunrise",
+        ] {
+            assert!(text.contains(want), "{want:?} not in\n{text}");
+        }
     }
 }

@@ -6,15 +6,22 @@
 //! * [`table`]: configurable Sun/Moon ephemeris table
 //!   (`mooncalc_core::tables`), copyable as CSV/TSV.
 //! * [`riseset`]: a month of Sun/Moon rise, transit and set with azimuths,
-//!   and twilight (`mooncalc_core::events`).
+//!   and twilight.
 //! * [`phases`]: the principal lunar phases of a year with the Moon's age.
 //! * [`apsides`]: perigee/apogee, node passages and maximum declinations.
 //! * [`eclipses`]: solar and lunar eclipses of a range of years with local
 //!   circumstances at the app location.
 //! * [`seasons`]: equinoxes and solstices, and the equation of time.
 //!
+//! Rise/set, phases, apsides, eclipses and seasons come from the shared
+//! services in `mooncalc_app::tables` (the Tauri frontend's too), with the
+//! service's coverage margins checked before submitting. The table calls
+//! `mooncalc_core::tables::ephemeris_table` directly, the function the
+//! service wraps: its columns format the core rows' radians, which the
+//! service's degree DTOs would only round-trip.
+//!
 //! Times are shown in the app time zone (`Settings::time.zone()`), each
-//! with the offset in force at that instant.
+//! with the offset in force at that instant; requests carry the IANA zone.
 //! Clicking an event time sets the app date/time to it.
 
 use mooncalc_atlas::Zone;

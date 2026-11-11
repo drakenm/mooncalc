@@ -120,6 +120,8 @@ function emptyCrescent(crescent: 'evening' | 'morning'): CrescentReport {
     bestTime: null,
     conjunction: null,
     geometry: null,
+    geometryAt: null,
+    geometryAtSunEvent: false,
     criteria: CRITERIA.map((c) => ({
       criterionId: c.id,
       name: c.name,

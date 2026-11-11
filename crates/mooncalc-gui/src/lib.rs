@@ -15,9 +15,13 @@
 //! * Shared services: [`backend::resolve`] (the ephemeris every tab and job
 //!   uses), [`location::search_cities`] (city atlas),
 //!   [`criteria::criterion_options`] (criteria),
-//!   [`tabs::map::compute::compute_map`] (visibility grid),
-//!   [`export`] (PNG/SVG export, native dialogs), [`format`] (times and
-//!   angles as text), [`attributions::ATTRIBUTIONS`] (credits).
+//!   [`tabs::map::compute::compute_map`] (visibility grid, threaded over
+//!   `mooncalc_app::map`), [`export`] (PNG/SVG export, native dialogs),
+//!   [`format`] (times and angles as text), [`attributions::ATTRIBUTIONS`]
+//!   (credits).
+//! * Computation comes from `mooncalc_app`, the services the Tauri frontend
+//!   uses too: the report, maps and the earliest-sighting scan, and the sky
+//!   and Moon math. Tabs add threading (jobs), wording and layout.
 
 pub mod app;
 pub mod attributions;
