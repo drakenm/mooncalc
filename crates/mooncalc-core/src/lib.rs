@@ -34,6 +34,7 @@ pub mod ephemeris;
 pub mod illumination;
 pub mod matrix;
 pub mod meeus;
+pub mod nodes;
 pub mod nutation;
 pub mod precession;
 pub mod refraction;
