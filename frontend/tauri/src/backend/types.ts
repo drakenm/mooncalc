@@ -386,3 +386,6 @@ export interface Basemap {
   borders: PolylineSet;
   attribution: string;
 }
+
+export * from './types-calendar';
+export * from './types-tables';

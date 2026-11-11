@@ -1,0 +1,304 @@
+/* Calendar tab. */
+
+.calendar-view .cal-toolbar {
+  padding: 4px 0 8px;
+  flex-wrap: wrap;
+}
+
+.calendar-view .cal-toolbar .segmented {
+  display: inline-grid;
+}
+
+.calendar-view .nav {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.arabic {
+  font-family: 'Segoe UI', 'Noto Naskh Arabic', 'Geeza Pro', 'Arial', sans-serif;
+  unicode-bidi: isolate;
+}
+
+.heading-ar {
+  font-weight: 500;
+  color: var(--text-muted);
+  margin-left: 8px;
+}
+
+.visibility-settings {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  margin-bottom: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.visibility-settings select {
+  width: auto;
+  max-width: 340px;
+}
+
+.visibility-settings .inline {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.vis-label {
+  font-weight: 600;
+  font-size: 12px;
+}
+
+.sunset-note {
+  font-size: 13px;
+  margin: 8px 0 10px;
+}
+
+.selected-line {
+  font-size: 15px;
+}
+
+.sub-ar,
+.selected-line > .arabic {
+  margin-left: 6px;
+}
+
+.hijri-long .arabic {
+  margin-left: 6px;
+  font-size: 17px;
+}
+
+.muted {
+  color: var(--text-muted);
+}
+
+.warn {
+  color: var(--warn-text);
+}
+
+/* Month grid. */
+
+.month-title {
+  margin: 4px 0 8px;
+}
+
+.month-name {
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.title-ar {
+  margin-left: 10px;
+  font-size: 22px;
+  font-weight: 500;
+}
+
+.month-grid {
+  border-collapse: separate;
+  border-spacing: 4px;
+  table-layout: fixed;
+  width: 100%;
+  max-width: 820px;
+}
+
+.month-grid th {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.th-ar {
+  display: block;
+  font-weight: 400;
+  font-size: 13px;
+}
+
+.month-grid td {
+  padding: 0;
+  height: 68px;
+  vertical-align: top;
+}
+
+.month-grid td.empty {
+  background: transparent;
+}
+
+.month-grid td button {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  width: 100%;
+  height: 100%;
+  padding: 5px 7px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  cursor: pointer;
+  text-align: left;
+}
+
+.month-grid td button:hover {
+  border-color: var(--accent);
+}
+
+.month-grid td.friday button {
+  background: var(--surface-2);
+}
+
+.month-grid td.today button {
+  border-color: var(--focus);
+  box-shadow: inset 0 0 0 1px var(--focus);
+}
+
+.month-grid td.selected button {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+.month-grid td.month-first .day-sub {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.day-main {
+  display: flex;
+  justify-content: space-between;
+  width: 100%;
+  font-size: 18px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.day-ar {
+  font-size: 15px;
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
+.day-sub {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.day-month-ar {
+  font-size: 12px;
+  color: var(--accent);
+}
+
+/* Converter. */
+
+.converter {
+  display: grid;
+  grid-template-columns: 90px auto 1fr;
+  align-items: center;
+  gap: 8px 12px;
+  max-width: 980px;
+}
+
+.conv-label {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.conv-inputs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.conv-inputs select {
+  width: auto;
+}
+
+.day-input {
+  width: 64px;
+}
+
+.year-input {
+  width: 86px;
+}
+
+.conv-result .arabic {
+  margin-left: 4px;
+}
+
+/* Comparison. */
+
+.compare-wrap {
+  overflow-x: auto;
+}
+
+.compare-table th.current,
+.compare-table td.current {
+  box-shadow: inset 2px 0 0 var(--accent), inset -2px 0 0 var(--accent);
+}
+
+.compare-table tbody tr {
+  cursor: default;
+}
+
+.compare-table tbody th {
+  font-weight: 500;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.compare-table .month-ar {
+  display: block;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.compare-table tr.disagrees th {
+  color: var(--warn-text);
+}
+
+.compare-table td.differs {
+  background: var(--warn-bg);
+  color: var(--warn-text);
+  font-weight: 600;
+}
+
+.compare-table td.selected {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.compare-table td {
+  white-space: nowrap;
+}
+
+.compare-table .wd {
+  font-size: 11px;
+}
+
+.stepper {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Shared with the Ephemeris tab. */
+
+.time-link {
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  font-variant-numeric: tabular-nums;
+  text-align: inherit;
+}
+
+.time-link:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}

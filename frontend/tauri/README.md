@@ -27,10 +27,14 @@ Debug builds compile the workspace crates without optimisation, so maps are seve
 | `src/backend/backend.ts` | The `Backend` interface and `BackendError`. |
 | `src/backend/tauri.ts` | `TauriBackend`: `invoke` from `@tauri-apps/api`. The only module that imports Tauri. |
 | `src/backend/mock.ts` | `MockBackend`: placeholder data for `npm run dev` in a browser (synthetic zones, empty report, no base map). |
+| `src/backend/types-calendar.ts`, `types-tables.ts` | Wire types and the `CalendarApi` / `TablesApi` interfaces (`backend.calendar`, `backend.tables`), mirroring `crates/mooncalc-app/src/{calendar,tables}/dto.rs`. |
+| `src/backend/tauri-extras.ts`, `mock-extras.ts` | Their Tauri bindings, and in-browser stand-ins (tabular arithmetic, mean motions, canned 2024 eclipses). |
 | `src/backend/index.ts` | `createBackend()` picks a transport at startup and loads it lazily. |
 | `src/state.ts` | Observable app state (date/time, location, criterion, ...). |
-| `src/ui/` | Sidebar, tab shell, map canvas (`map-view.ts`, `map-image.ts`, `basemap-layer.ts`), report, earliest sighting, placeholders, About. |
+| `src/ui/` | Sidebar, tab shell, map canvas (`map-view.ts`, `map-image.ts`, `basemap-layer.ts`), report, earliest sighting, Calendar (`calendar-view.ts`), Ephemeris (`ephemeris-*.ts`), placeholders, About. |
 
 UI modules import only `src/backend/index.ts`, never a transport. The planned browser frontend adds a `WasmBackend` implementing the same interface.
 
 Maps arrive as base64 zone indices, an optional 16-bit value field and a legend (see `MapResult` in `crates/mooncalc-app/src/dto.rs`). `src/ui/map-image.ts` decodes them and rasterises the zones at device resolution for the current view: where the criterion's zones are thresholds of its value (Yallop q, Odeh V, two-zone margins), each pixel classifies the bilinearly interpolated value, so zone edges are smooth contour lines; elsewhere it takes a bilinear vote of the neighbouring cells. While panning or zooming the last raster is transformed as a preview and redrawn when the view settles. Coastlines and borders come from the `basemap` command (Natural Earth 1:110m, and 1:50m once zoomed in). `src/ui/map-view.ts` adds the graticule, legend, conjunction and best-cell info, a hover readout with zone and value, click-to-set-location (named after the nearest atlas city) and PNG export (`save_map_png` writes to the Downloads folder on the desktop).
+
+The Calendar tab shows a month by the Hijri or the Gregorian month (with month and weekday names in Arabic script), a converter and the month starts of a Hijri year under every calendar. Rule and visibility calendars are computed with the selected ephemeris; the `calendar_*` view commands compute the Hijri years they need on worker threads before answering. The Ephemeris tab has Table (copy as CSV/TSV), Rise/set, Lunar phases, Apsides & nodes, Eclipses (with local circumstances at the app location) and Seasons; clicking a time sets the app date and time. Both keep their own settings in `localStorage` (`mooncalc.calendar.v1`, `mooncalc.ephemeris.*`).

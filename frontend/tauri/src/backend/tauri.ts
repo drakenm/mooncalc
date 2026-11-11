@@ -5,6 +5,7 @@
 import { invoke } from '@tauri-apps/api/core';
 
 import { BackendError, type Backend } from './backend';
+import { tauriCalendarApi, tauriTablesApi } from './tauri-extras';
 import type {
   AppInfo,
   Basemap,
@@ -37,6 +38,8 @@ async function call<T>(command: string, args?: Record<string, unknown>): Promise
 
 export class TauriBackend implements Backend {
   readonly kind = 'tauri' as const;
+  readonly calendar = tauriCalendarApi(call);
+  readonly tables = tauriTablesApi(call);
 
   appInfo(): Promise<AppInfo> {
     return call('app_info');
