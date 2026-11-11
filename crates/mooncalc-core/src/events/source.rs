@@ -235,6 +235,12 @@ mod tests {
             }
             worst[2] = worst[2].max(norm_pi(table.gast(jd) - direct.gast(jd)).abs());
         }
+        println!(
+            "table vs direct: Sun {:.2e}″, Moon {:.2e}″, GAST {:.2e}″",
+            worst[0] / ARCSEC,
+            worst[1] / ARCSEC,
+            worst[2] / ARCSEC
+        );
         assert!(worst[0] < 1e-3 * ARCSEC, "Sun {}″", worst[0] / ARCSEC);
         assert!(worst[1] < 1e-3 * ARCSEC, "Moon {}″", worst[1] / ARCSEC);
         assert!(worst[2] < 1e-4 * ARCSEC, "GAST {}″", worst[2] / ARCSEC);
