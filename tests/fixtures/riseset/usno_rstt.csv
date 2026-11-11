@@ -1,0 +1,559 @@
+site,lon_deg,lat_deg,date_ut,body,event,time_ut,usno_phen
+mecca,39.8262,21.4225,2024-01-15,sun,civil_twilight_begin,03:37,Begin Civil Twilight
+mecca,39.8262,21.4225,2024-01-15,sun,rise,04:01,Rise
+mecca,39.8262,21.4225,2024-01-15,sun,upper_transit,09:30,Upper Transit
+mecca,39.8262,21.4225,2024-01-15,sun,set,14:59,Set
+mecca,39.8262,21.4225,2024-01-15,sun,civil_twilight_end,15:23,End Civil Twilight
+mecca,39.8262,21.4225,2024-01-15,moon,rise,07:13,Rise
+mecca,39.8262,21.4225,2024-01-15,moon,upper_transit,13:12,Upper Transit
+mecca,39.8262,21.4225,2024-01-15,moon,set,19:17,Set
+mecca,39.8262,21.4225,2024-01-15,moon,fracillum,21%,Waxing Crescent
+mecca,39.8262,21.4225,2024-03-20,sun,civil_twilight_begin,03:02,Begin Civil Twilight
+mecca,39.8262,21.4225,2024-03-20,sun,rise,03:25,Rise
+mecca,39.8262,21.4225,2024-03-20,sun,upper_transit,09:28,Upper Transit
+mecca,39.8262,21.4225,2024-03-20,sun,set,15:32,Set
+mecca,39.8262,21.4225,2024-03-20,sun,civil_twilight_end,15:54,End Civil Twilight
+mecca,39.8262,21.4225,2024-03-20,moon,set,00:34,Set
+mecca,39.8262,21.4225,2024-03-20,moon,rise,11:36,Rise
+mecca,39.8262,21.4225,2024-03-20,moon,upper_transit,18:27,Upper Transit
+mecca,39.8262,21.4225,2024-03-20,moon,fracillum,81%,Waxing Gibbous
+mecca,39.8262,21.4225,2024-06-21,sun,civil_twilight_begin,02:15,Begin Civil Twilight
+mecca,39.8262,21.4225,2024-06-21,sun,rise,02:39,Rise
+mecca,39.8262,21.4225,2024-06-21,sun,upper_transit,09:23,Upper Transit
+mecca,39.8262,21.4225,2024-06-21,sun,set,16:06,Set
+mecca,39.8262,21.4225,2024-06-21,sun,civil_twilight_end,16:31,End Civil Twilight
+mecca,39.8262,21.4225,2024-06-21,moon,set,01:40,Set
+mecca,39.8262,21.4225,2024-06-21,moon,rise,15:50,Rise
+mecca,39.8262,21.4225,2024-06-21,moon,upper_transit,21:14,Upper Transit
+mecca,39.8262,21.4225,2024-06-21,moon,fracillum,99%,Waxing Gibbous
+mecca,39.8262,21.4225,2024-09-22,sun,civil_twilight_begin,02:47,Begin Civil Twilight
+mecca,39.8262,21.4225,2024-09-22,sun,rise,03:10,Rise
+mecca,39.8262,21.4225,2024-09-22,sun,upper_transit,09:13,Upper Transit
+mecca,39.8262,21.4225,2024-09-22,sun,set,15:17,Set
+mecca,39.8262,21.4225,2024-09-22,sun,civil_twilight_end,15:39,End Civil Twilight
+mecca,39.8262,21.4225,2024-09-22,moon,upper_transit,00:38,Upper Transit
+mecca,39.8262,21.4225,2024-09-22,moon,set,07:34,Set
+mecca,39.8262,21.4225,2024-09-22,moon,rise,18:38,Rise
+mecca,39.8262,21.4225,2024-09-22,moon,fracillum,74%,Waning Gibbous
+mecca,39.8262,21.4225,2024-12-21,sun,civil_twilight_begin,03:30,Begin Civil Twilight
+mecca,39.8262,21.4225,2024-12-21,sun,rise,03:54,Rise
+mecca,39.8262,21.4225,2024-12-21,sun,upper_transit,09:19,Upper Transit
+mecca,39.8262,21.4225,2024-12-21,sun,set,14:44,Set
+mecca,39.8262,21.4225,2024-12-21,sun,civil_twilight_end,15:08,End Civil Twilight
+mecca,39.8262,21.4225,2024-12-21,moon,upper_transit,02:07,Upper Transit
+mecca,39.8262,21.4225,2024-12-21,moon,set,08:31,Set
+mecca,39.8262,21.4225,2024-12-21,moon,rise,20:29,Rise
+mecca,39.8262,21.4225,2024-12-21,moon,fracillum,64%,Waning Gibbous
+mecca,39.8262,21.4225,2025-02-28,sun,civil_twilight_begin,03:20,Begin Civil Twilight
+mecca,39.8262,21.4225,2025-02-28,sun,rise,03:42,Rise
+mecca,39.8262,21.4225,2025-02-28,sun,upper_transit,09:33,Upper Transit
+mecca,39.8262,21.4225,2025-02-28,sun,set,15:25,Set
+mecca,39.8262,21.4225,2025-02-28,sun,civil_twilight_end,15:47,End Civil Twilight
+mecca,39.8262,21.4225,2025-02-28,moon,rise,03:56,Rise
+mecca,39.8262,21.4225,2025-02-28,moon,upper_transit,09:54,Upper Transit
+mecca,39.8262,21.4225,2025-02-28,moon,set,15:58,Set
+mecca,39.8262,21.4225,2025-02-28,moon,fracillum,0%,New Moon
+mecca,39.8262,21.4225,2025-05-10,sun,civil_twilight_begin,02:21,Begin Civil Twilight
+mecca,39.8262,21.4225,2025-05-10,sun,rise,02:45,Rise
+mecca,39.8262,21.4225,2025-05-10,sun,upper_transit,09:17,Upper Transit
+mecca,39.8262,21.4225,2025-05-10,sun,set,15:50,Set
+mecca,39.8262,21.4225,2025-05-10,sun,civil_twilight_end,16:14,End Civil Twilight
+mecca,39.8262,21.4225,2025-05-10,moon,set,01:05,Set
+mecca,39.8262,21.4225,2025-05-10,moon,rise,14:04,Rise
+mecca,39.8262,21.4225,2025-05-10,moon,upper_transit,19:53,Upper Transit
+mecca,39.8262,21.4225,2025-05-10,moon,fracillum,96%,Waxing Gibbous
+mecca,39.8262,21.4225,2025-08-05,sun,civil_twilight_begin,02:32,Begin Civil Twilight
+mecca,39.8262,21.4225,2025-08-05,sun,rise,02:56,Rise
+mecca,39.8262,21.4225,2025-08-05,sun,upper_transit,09:27,Upper Transit
+mecca,39.8262,21.4225,2025-08-05,sun,set,15:58,Set
+mecca,39.8262,21.4225,2025-08-05,sun,civil_twilight_end,16:21,End Civil Twilight
+mecca,39.8262,21.4225,2025-08-05,moon,rise,13:04,Rise
+mecca,39.8262,21.4225,2025-08-05,moon,upper_transit,18:26,Upper Transit
+mecca,39.8262,21.4225,2025-08-05,moon,set,23:48,Set
+mecca,39.8262,21.4225,2025-08-05,moon,fracillum,85%,Waxing Gibbous
+mecca,39.8262,21.4225,2025-11-01,sun,civil_twilight_begin,03:01,Begin Civil Twilight
+mecca,39.8262,21.4225,2025-11-01,sun,rise,03:24,Rise
+mecca,39.8262,21.4225,2025-11-01,sun,upper_transit,09:04,Upper Transit
+mecca,39.8262,21.4225,2025-11-01,sun,set,14:44,Set
+mecca,39.8262,21.4225,2025-11-01,sun,civil_twilight_end,15:07,End Civil Twilight
+mecca,39.8262,21.4225,2025-11-01,moon,rise,11:48,Rise
+mecca,39.8262,21.4225,2025-11-01,moon,upper_transit,17:48,Upper Transit
+mecca,39.8262,21.4225,2025-11-01,moon,set,23:54,Set
+mecca,39.8262,21.4225,2025-11-01,moon,fracillum,78%,Waxing Gibbous
+mecca,39.8262,21.4225,2026-01-20,sun,civil_twilight_begin,03:37,Begin Civil Twilight
+mecca,39.8262,21.4225,2026-01-20,sun,rise,04:01,Rise
+mecca,39.8262,21.4225,2026-01-20,sun,upper_transit,09:32,Upper Transit
+mecca,39.8262,21.4225,2026-01-20,sun,set,15:03,Set
+mecca,39.8262,21.4225,2026-01-20,sun,civil_twilight_end,15:26,End Civil Twilight
+mecca,39.8262,21.4225,2026-01-20,moon,rise,05:09,Rise
+mecca,39.8262,21.4225,2026-01-20,moon,upper_transit,10:50,Upper Transit
+mecca,39.8262,21.4225,2026-01-20,moon,set,16:36,Set
+mecca,39.8262,21.4225,2026-01-20,moon,fracillum,3%,Waxing Crescent
+greenwich,-0.0015,51.4769,2024-01-15,sun,civil_twilight_begin,07:21,Begin Civil Twilight
+greenwich,-0.0015,51.4769,2024-01-15,sun,rise,07:59,Rise
+greenwich,-0.0015,51.4769,2024-01-15,sun,upper_transit,12:09,Upper Transit
+greenwich,-0.0015,51.4769,2024-01-15,sun,set,16:20,Set
+greenwich,-0.0015,51.4769,2024-01-15,sun,civil_twilight_end,16:58,End Civil Twilight
+greenwich,-0.0015,51.4769,2024-01-15,moon,rise,10:21,Rise
+greenwich,-0.0015,51.4769,2024-01-15,moon,upper_transit,15:57,Upper Transit
+greenwich,-0.0015,51.4769,2024-01-15,moon,set,21:50,Set
+greenwich,-0.0015,51.4769,2024-01-15,moon,fracillum,21%,Waxing Crescent
+greenwich,-0.0015,51.4769,2024-03-20,sun,civil_twilight_begin,05:29,Begin Civil Twilight
+greenwich,-0.0015,51.4769,2024-03-20,sun,rise,06:02,Rise
+greenwich,-0.0015,51.4769,2024-03-20,sun,upper_transit,12:07,Upper Transit
+greenwich,-0.0015,51.4769,2024-03-20,sun,set,18:14,Set
+greenwich,-0.0015,51.4769,2024-03-20,sun,civil_twilight_end,18:47,End Civil Twilight
+greenwich,-0.0015,51.4769,2024-03-20,moon,set,04:55,Set
+greenwich,-0.0015,51.4769,2024-03-20,moon,rise,12:49,Rise
+greenwich,-0.0015,51.4769,2024-03-20,moon,upper_transit,21:12,Upper Transit
+greenwich,-0.0015,51.4769,2024-03-20,moon,fracillum,81%,Waxing Gibbous
+greenwich,-0.0015,51.4769,2024-06-21,sun,civil_twilight_begin,02:55,Begin Civil Twilight
+greenwich,-0.0015,51.4769,2024-06-21,sun,rise,03:43,Rise
+greenwich,-0.0015,51.4769,2024-06-21,sun,upper_transit,12:02,Upper Transit
+greenwich,-0.0015,51.4769,2024-06-21,sun,set,20:21,Set
+greenwich,-0.0015,51.4769,2024-06-21,sun,civil_twilight_end,21:09,End Civil Twilight
+greenwich,-0.0015,51.4769,2024-06-21,moon,set,02:24,Set
+greenwich,-0.0015,51.4769,2024-06-21,moon,rise,20:43,Rise
+greenwich,-0.0015,51.4769,2024-06-21,moon,fracillum,99%,Waxing Gibbous
+greenwich,-0.0015,51.4769,2024-09-22,sun,civil_twilight_begin,05:13,Begin Civil Twilight
+greenwich,-0.0015,51.4769,2024-09-22,sun,rise,05:47,Rise
+greenwich,-0.0015,51.4769,2024-09-22,sun,upper_transit,11:53,Upper Transit
+greenwich,-0.0015,51.4769,2024-09-22,sun,set,17:57,Set
+greenwich,-0.0015,51.4769,2024-09-22,sun,civil_twilight_end,18:31,End Civil Twilight
+greenwich,-0.0015,51.4769,2024-09-22,moon,upper_transit,03:24,Upper Transit
+greenwich,-0.0015,51.4769,2024-09-22,moon,set,12:03,Set
+greenwich,-0.0015,51.4769,2024-09-22,moon,rise,19:35,Rise
+greenwich,-0.0015,51.4769,2024-09-22,moon,fracillum,74%,Waning Gibbous
+greenwich,-0.0015,51.4769,2024-12-21,sun,civil_twilight_begin,07:23,Begin Civil Twilight
+greenwich,-0.0015,51.4769,2024-12-21,sun,rise,08:03,Rise
+greenwich,-0.0015,51.4769,2024-12-21,sun,upper_transit,11:58,Upper Transit
+greenwich,-0.0015,51.4769,2024-12-21,sun,set,15:53,Set
+greenwich,-0.0015,51.4769,2024-12-21,sun,civil_twilight_end,16:34,End Civil Twilight
+greenwich,-0.0015,51.4769,2024-12-21,moon,upper_transit,04:51,Upper Transit
+greenwich,-0.0015,51.4769,2024-12-21,moon,set,11:40,Set
+greenwich,-0.0015,51.4769,2024-12-21,moon,rise,22:56,Rise
+greenwich,-0.0015,51.4769,2024-12-21,moon,fracillum,64%,Waning Gibbous
+greenwich,-0.0015,51.4769,2025-02-28,sun,civil_twilight_begin,06:13,Begin Civil Twilight
+greenwich,-0.0015,51.4769,2025-02-28,sun,rise,06:47,Rise
+greenwich,-0.0015,51.4769,2025-02-28,sun,upper_transit,12:12,Upper Transit
+greenwich,-0.0015,51.4769,2025-02-28,sun,set,17:39,Set
+greenwich,-0.0015,51.4769,2025-02-28,sun,civil_twilight_end,18:12,End Civil Twilight
+greenwich,-0.0015,51.4769,2025-02-28,moon,rise,07:08,Rise
+greenwich,-0.0015,51.4769,2025-02-28,moon,upper_transit,12:39,Upper Transit
+greenwich,-0.0015,51.4769,2025-02-28,moon,set,18:28,Set
+greenwich,-0.0015,51.4769,2025-02-28,moon,fracillum,0%,New Moon
+greenwich,-0.0015,51.4769,2025-05-10,sun,civil_twilight_begin,03:36,Begin Civil Twilight
+greenwich,-0.0015,51.4769,2025-05-10,sun,rise,04:16,Rise
+greenwich,-0.0015,51.4769,2025-05-10,sun,upper_transit,11:56,Upper Transit
+greenwich,-0.0015,51.4769,2025-05-10,sun,set,19:38,Set
+greenwich,-0.0015,51.4769,2025-05-10,sun,civil_twilight_end,20:18,End Civil Twilight
+greenwich,-0.0015,51.4769,2025-05-10,moon,set,03:10,Set
+greenwich,-0.0015,51.4769,2025-05-10,moon,rise,17:40,Rise
+greenwich,-0.0015,51.4769,2025-05-10,moon,upper_transit,22:36,Upper Transit
+greenwich,-0.0015,51.4769,2025-05-10,moon,fracillum,96%,Waxing Gibbous
+greenwich,-0.0015,51.4769,2025-08-05,sun,civil_twilight_begin,03:51,Begin Civil Twilight
+greenwich,-0.0015,51.4769,2025-08-05,sun,rise,04:30,Rise
+greenwich,-0.0015,51.4769,2025-08-05,sun,upper_transit,12:06,Upper Transit
+greenwich,-0.0015,51.4769,2025-08-05,sun,set,19:41,Set
+greenwich,-0.0015,51.4769,2025-08-05,sun,civil_twilight_end,20:20,End Civil Twilight
+greenwich,-0.0015,51.4769,2025-08-05,moon,rise,17:57,Rise
+greenwich,-0.0015,51.4769,2025-08-05,moon,upper_transit,21:11,Upper Transit
+greenwich,-0.0015,51.4769,2025-08-05,moon,fracillum,85%,Waxing Gibbous
+greenwich,-0.0015,51.4769,2025-11-01,sun,civil_twilight_begin,06:19,Begin Civil Twilight
+greenwich,-0.0015,51.4769,2025-11-01,sun,rise,06:54,Rise
+greenwich,-0.0015,51.4769,2025-11-01,sun,upper_transit,11:44,Upper Transit
+greenwich,-0.0015,51.4769,2025-11-01,sun,set,16:33,Set
+greenwich,-0.0015,51.4769,2025-11-01,sun,civil_twilight_end,17:08,End Civil Twilight
+greenwich,-0.0015,51.4769,2025-11-01,moon,set,01:06,Set
+greenwich,-0.0015,51.4769,2025-11-01,moon,rise,14:53,Rise
+greenwich,-0.0015,51.4769,2025-11-01,moon,upper_transit,20:33,Upper Transit
+greenwich,-0.0015,51.4769,2025-11-01,moon,fracillum,78%,Waxing Gibbous
+greenwich,-0.0015,51.4769,2026-01-20,sun,civil_twilight_begin,07:16,Begin Civil Twilight
+greenwich,-0.0015,51.4769,2026-01-20,sun,rise,07:54,Rise
+greenwich,-0.0015,51.4769,2026-01-20,sun,upper_transit,12:11,Upper Transit
+greenwich,-0.0015,51.4769,2026-01-20,sun,set,16:29,Set
+greenwich,-0.0015,51.4769,2026-01-20,sun,civil_twilight_end,17:06,End Civil Twilight
+greenwich,-0.0015,51.4769,2026-01-20,moon,rise,08:58,Rise
+greenwich,-0.0015,51.4769,2026-01-20,moon,upper_transit,13:35,Upper Transit
+greenwich,-0.0015,51.4769,2026-01-20,moon,set,18:24,Set
+greenwich,-0.0015,51.4769,2026-01-20,moon,fracillum,3%,Waxing Crescent
+cape_town,18.4241,-33.9249,2024-01-15,sun,civil_twilight_begin,03:22,Begin Civil Twilight
+cape_town,18.4241,-33.9249,2024-01-15,sun,rise,03:50,Rise
+cape_town,18.4241,-33.9249,2024-01-15,sun,upper_transit,10:56,Upper Transit
+cape_town,18.4241,-33.9249,2024-01-15,sun,set,18:00,Set
+cape_town,18.4241,-33.9249,2024-01-15,sun,civil_twilight_end,18:29,End Civil Twilight
+cape_town,18.4241,-33.9249,2024-01-15,moon,rise,08:08,Rise
+cape_town,18.4241,-33.9249,2024-01-15,moon,upper_transit,14:41,Upper Transit
+cape_town,18.4241,-33.9249,2024-01-15,moon,set,21:03,Set
+cape_town,18.4241,-33.9249,2024-01-15,moon,fracillum,21%,Waxing Crescent
+cape_town,18.4241,-33.9249,2024-03-20,sun,civil_twilight_begin,04:25,Begin Civil Twilight
+cape_town,18.4241,-33.9249,2024-03-20,sun,rise,04:50,Rise
+cape_town,18.4241,-33.9249,2024-03-20,sun,upper_transit,10:54,Upper Transit
+cape_town,18.4241,-33.9249,2024-03-20,sun,set,16:57,Set
+cape_town,18.4241,-33.9249,2024-03-20,sun,civil_twilight_end,17:22,End Civil Twilight
+cape_town,18.4241,-33.9249,2024-03-20,moon,set,00:05,Set
+cape_town,18.4241,-33.9249,2024-03-20,moon,rise,14:51,Rise
+cape_town,18.4241,-33.9249,2024-03-20,moon,upper_transit,19:56,Upper Transit
+cape_town,18.4241,-33.9249,2024-03-20,moon,fracillum,81%,Waxing Gibbous
+cape_town,18.4241,-33.9249,2024-06-21,sun,civil_twilight_begin,05:24,Begin Civil Twilight
+cape_town,18.4241,-33.9249,2024-06-21,sun,rise,05:51,Rise
+cape_town,18.4241,-33.9249,2024-06-21,sun,upper_transit,10:48,Upper Transit
+cape_town,18.4241,-33.9249,2024-06-21,sun,set,15:45,Set
+cape_town,18.4241,-33.9249,2024-06-21,sun,civil_twilight_end,16:13,End Civil Twilight
+cape_town,18.4241,-33.9249,2024-06-21,moon,set,05:24,Set
+cape_town,18.4241,-33.9249,2024-06-21,moon,rise,15:01,Rise
+cape_town,18.4241,-33.9249,2024-06-21,moon,upper_transit,22:43,Upper Transit
+cape_town,18.4241,-33.9249,2024-06-21,moon,fracillum,99%,Waxing Gibbous
+cape_town,18.4241,-33.9249,2024-09-22,sun,civil_twilight_begin,04:10,Begin Civil Twilight
+cape_town,18.4241,-33.9249,2024-09-22,sun,rise,04:35,Rise
+cape_town,18.4241,-33.9249,2024-09-22,sun,upper_transit,10:39,Upper Transit
+cape_town,18.4241,-33.9249,2024-09-22,sun,set,16:43,Set
+cape_town,18.4241,-33.9249,2024-09-22,sun,civil_twilight_end,17:08,End Civil Twilight
+cape_town,18.4241,-33.9249,2024-09-22,moon,upper_transit,02:07,Upper Transit
+cape_town,18.4241,-33.9249,2024-09-22,moon,set,07:09,Set
+cape_town,18.4241,-33.9249,2024-09-22,moon,rise,22:12,Rise
+cape_town,18.4241,-33.9249,2024-09-22,moon,fracillum,74%,Waning Gibbous
+cape_town,18.4241,-33.9249,2024-12-21,sun,civil_twilight_begin,03:03,Begin Civil Twilight
+cape_town,18.4241,-33.9249,2024-12-21,sun,rise,03:32,Rise
+cape_town,18.4241,-33.9249,2024-12-21,sun,upper_transit,10:45,Upper Transit
+cape_town,18.4241,-33.9249,2024-12-21,sun,set,17:57,Set
+cape_town,18.4241,-33.9249,2024-12-21,sun,civil_twilight_end,18:26,End Civil Twilight
+cape_town,18.4241,-33.9249,2024-12-21,moon,upper_transit,03:35,Upper Transit
+cape_town,18.4241,-33.9249,2024-12-21,moon,set,09:22,Set
+cape_town,18.4241,-33.9249,2024-12-21,moon,rise,22:20,Rise
+cape_town,18.4241,-33.9249,2024-12-21,moon,fracillum,64%,Waning Gibbous
+cape_town,18.4241,-33.9249,2025-02-28,sun,civil_twilight_begin,04:08,Begin Civil Twilight
+cape_town,18.4241,-33.9249,2025-02-28,sun,rise,04:33,Rise
+cape_town,18.4241,-33.9249,2025-02-28,sun,upper_transit,10:59,Upper Transit
+cape_town,18.4241,-33.9249,2025-02-28,sun,set,17:24,Set
+cape_town,18.4241,-33.9249,2025-02-28,sun,civil_twilight_end,17:49,End Civil Twilight
+cape_town,18.4241,-33.9249,2025-02-28,moon,rise,04:48,Rise
+cape_town,18.4241,-33.9249,2025-02-28,moon,upper_transit,11:23,Upper Transit
+cape_town,18.4241,-33.9249,2025-02-28,moon,set,17:47,Set
+cape_town,18.4241,-33.9249,2025-02-28,moon,fracillum,0%,New Moon
+cape_town,18.4241,-33.9249,2025-05-10,sun,civil_twilight_begin,05:02,Begin Civil Twilight
+cape_town,18.4241,-33.9249,2025-05-10,sun,rise,05:28,Rise
+cape_town,18.4241,-33.9249,2025-05-10,sun,upper_transit,10:43,Upper Transit
+cape_town,18.4241,-33.9249,2025-05-10,sun,set,15:57,Set
+cape_town,18.4241,-33.9249,2025-05-10,sun,civil_twilight_end,16:23,End Civil Twilight
+cape_town,18.4241,-33.9249,2025-05-10,moon,set,03:19,Set
+cape_town,18.4241,-33.9249,2025-05-10,moon,rise,14:34,Rise
+cape_town,18.4241,-33.9249,2025-05-10,moon,upper_transit,21:21,Upper Transit
+cape_town,18.4241,-33.9249,2025-05-10,moon,fracillum,96%,Waxing Gibbous
+cape_town,18.4241,-33.9249,2025-08-05,sun,civil_twilight_begin,05:09,Begin Civil Twilight
+cape_town,18.4241,-33.9249,2025-08-05,sun,rise,05:35,Rise
+cape_town,18.4241,-33.9249,2025-08-05,sun,upper_transit,10:52,Upper Transit
+cape_town,18.4241,-33.9249,2025-08-05,sun,set,16:10,Set
+cape_town,18.4241,-33.9249,2025-08-05,sun,civil_twilight_end,16:36,End Civil Twilight
+cape_town,18.4241,-33.9249,2025-08-05,moon,set,02:42,Set
+cape_town,18.4241,-33.9249,2025-08-05,moon,rise,12:12,Rise
+cape_town,18.4241,-33.9249,2025-08-05,moon,upper_transit,19:55,Upper Transit
+cape_town,18.4241,-33.9249,2025-08-05,moon,fracillum,85%,Waxing Gibbous
+cape_town,18.4241,-33.9249,2025-11-01,sun,civil_twilight_begin,03:19,Begin Civil Twilight
+cape_town,18.4241,-33.9249,2025-11-01,sun,rise,03:46,Rise
+cape_town,18.4241,-33.9249,2025-11-01,sun,upper_transit,10:30,Upper Transit
+cape_town,18.4241,-33.9249,2025-11-01,sun,set,17:15,Set
+cape_town,18.4241,-33.9249,2025-11-01,sun,civil_twilight_end,17:41,End Civil Twilight
+cape_town,18.4241,-33.9249,2025-11-01,moon,set,01:07,Set
+cape_town,18.4241,-33.9249,2025-11-01,moon,rise,12:47,Rise
+cape_town,18.4241,-33.9249,2025-11-01,moon,upper_transit,19:17,Upper Transit
+cape_town,18.4241,-33.9249,2025-11-01,moon,fracillum,78%,Waxing Gibbous
+cape_town,18.4241,-33.9249,2026-01-20,sun,civil_twilight_begin,03:28,Begin Civil Twilight
+cape_town,18.4241,-33.9249,2026-01-20,sun,rise,03:56,Rise
+cape_town,18.4241,-33.9249,2026-01-20,sun,upper_transit,10:57,Upper Transit
+cape_town,18.4241,-33.9249,2026-01-20,sun,set,17:58,Set
+cape_town,18.4241,-33.9249,2026-01-20,sun,civil_twilight_end,18:26,End Civil Twilight
+cape_town,18.4241,-33.9249,2026-01-20,moon,rise,05:16,Rise
+cape_town,18.4241,-33.9249,2026-01-20,moon,upper_transit,12:19,Upper Transit
+cape_town,18.4241,-33.9249,2026-01-20,moon,set,19:12,Set
+cape_town,18.4241,-33.9249,2026-01-20,moon,fracillum,3%,Waxing Crescent
+kuala_lumpur,101.6869,3.139,2024-01-15,sun,upper_transit,05:22,Upper Transit
+kuala_lumpur,101.6869,3.139,2024-01-15,sun,set,11:21,Set
+kuala_lumpur,101.6869,3.139,2024-01-15,sun,civil_twilight_end,11:43,End Civil Twilight
+kuala_lumpur,101.6869,3.139,2024-01-15,sun,civil_twilight_begin,23:02,Begin Civil Twilight
+kuala_lumpur,101.6869,3.139,2024-01-15,sun,rise,23:24,Rise
+kuala_lumpur,101.6869,3.139,2024-01-15,moon,rise,02:46,Rise
+kuala_lumpur,101.6869,3.139,2024-01-15,moon,upper_transit,08:56,Upper Transit
+kuala_lumpur,101.6869,3.139,2024-01-15,moon,set,15:07,Set
+kuala_lumpur,101.6869,3.139,2024-01-15,moon,fracillum,21%,Waxing Crescent
+kuala_lumpur,101.6869,3.139,2024-03-20,sun,upper_transit,05:21,Upper Transit
+kuala_lumpur,101.6869,3.139,2024-03-20,sun,set,11:24,Set
+kuala_lumpur,101.6869,3.139,2024-03-20,sun,civil_twilight_end,11:45,End Civil Twilight
+kuala_lumpur,101.6869,3.139,2024-03-20,sun,civil_twilight_begin,22:56,Begin Civil Twilight
+kuala_lumpur,101.6869,3.139,2024-03-20,sun,rise,23:17,Rise
+kuala_lumpur,101.6869,3.139,2024-03-20,moon,rise,07:55,Rise
+kuala_lumpur,101.6869,3.139,2024-03-20,moon,upper_transit,14:12,Upper Transit
+kuala_lumpur,101.6869,3.139,2024-03-20,moon,set,20:28,Set
+kuala_lumpur,101.6869,3.139,2024-03-20,moon,fracillum,81%,Waxing Gibbous
+kuala_lumpur,101.6869,3.139,2024-06-21,sun,upper_transit,05:15,Upper Transit
+kuala_lumpur,101.6869,3.139,2024-06-21,sun,set,11:24,Set
+kuala_lumpur,101.6869,3.139,2024-06-21,sun,civil_twilight_end,11:47,End Civil Twilight
+kuala_lumpur,101.6869,3.139,2024-06-21,sun,civil_twilight_begin,22:44,Begin Civil Twilight
+kuala_lumpur,101.6869,3.139,2024-06-21,sun,rise,23:06,Rise
+kuala_lumpur,101.6869,3.139,2024-06-21,moon,rise,10:49,Rise
+kuala_lumpur,101.6869,3.139,2024-06-21,moon,upper_transit,16:56,Upper Transit
+kuala_lumpur,101.6869,3.139,2024-06-21,moon,set,23:03,Set
+kuala_lumpur,101.6869,3.139,2024-06-21,moon,fracillum,99%,Waxing Gibbous
+kuala_lumpur,101.6869,3.139,2024-09-22,sun,upper_transit,05:06,Upper Transit
+kuala_lumpur,101.6869,3.139,2024-09-22,sun,set,11:09,Set
+kuala_lumpur,101.6869,3.139,2024-09-22,sun,civil_twilight_end,11:30,End Civil Twilight
+kuala_lumpur,101.6869,3.139,2024-09-22,sun,civil_twilight_begin,22:42,Begin Civil Twilight
+kuala_lumpur,101.6869,3.139,2024-09-22,sun,rise,23:02,Rise
+kuala_lumpur,101.6869,3.139,2024-09-22,moon,set,02:40,Set
+kuala_lumpur,101.6869,3.139,2024-09-22,moon,rise,14:59,Rise
+kuala_lumpur,101.6869,3.139,2024-09-22,moon,upper_transit,21:19,Upper Transit
+kuala_lumpur,101.6869,3.139,2024-09-22,moon,fracillum,74%,Waning Gibbous
+kuala_lumpur,101.6869,3.139,2024-12-21,sun,upper_transit,05:11,Upper Transit
+kuala_lumpur,101.6869,3.139,2024-12-21,sun,set,11:10,Set
+kuala_lumpur,101.6869,3.139,2024-12-21,sun,civil_twilight_end,11:32,End Civil Twilight
+kuala_lumpur,101.6869,3.139,2024-12-21,sun,civil_twilight_begin,22:51,Begin Civil Twilight
+kuala_lumpur,101.6869,3.139,2024-12-21,sun,rise,23:14,Rise
+kuala_lumpur,101.6869,3.139,2024-12-21,moon,set,04:05,Set
+kuala_lumpur,101.6869,3.139,2024-12-21,moon,rise,16:22,Rise
+kuala_lumpur,101.6869,3.139,2024-12-21,moon,upper_transit,22:33,Upper Transit
+kuala_lumpur,101.6869,3.139,2024-12-21,moon,fracillum,64%,Waning Gibbous
+kuala_lumpur,101.6869,3.139,2025-02-28,sun,upper_transit,05:26,Upper Transit
+kuala_lumpur,101.6869,3.139,2025-02-28,sun,set,11:27,Set
+kuala_lumpur,101.6869,3.139,2025-02-28,sun,civil_twilight_end,11:48,End Civil Twilight
+kuala_lumpur,101.6869,3.139,2025-02-28,sun,civil_twilight_begin,23:03,Begin Civil Twilight
+kuala_lumpur,101.6869,3.139,2025-02-28,sun,rise,23:24,Rise
+kuala_lumpur,101.6869,3.139,2025-02-28,moon,upper_transit,05:38,Upper Transit
+kuala_lumpur,101.6869,3.139,2025-02-28,moon,set,11:49,Set
+kuala_lumpur,101.6869,3.139,2025-02-28,moon,fracillum,0%,New Moon
+kuala_lumpur,101.6869,3.139,2025-05-10,sun,upper_transit,05:10,Upper Transit
+kuala_lumpur,101.6869,3.139,2025-05-10,sun,set,11:17,Set
+kuala_lumpur,101.6869,3.139,2025-05-10,sun,civil_twilight_end,11:39,End Civil Twilight
+kuala_lumpur,101.6869,3.139,2025-05-10,sun,civil_twilight_begin,22:40,Begin Civil Twilight
+kuala_lumpur,101.6869,3.139,2025-05-10,sun,rise,23:02,Rise
+kuala_lumpur,101.6869,3.139,2025-05-10,moon,rise,09:31,Rise
+kuala_lumpur,101.6869,3.139,2025-05-10,moon,upper_transit,15:38,Upper Transit
+kuala_lumpur,101.6869,3.139,2025-05-10,moon,set,21:45,Set
+kuala_lumpur,101.6869,3.139,2025-05-10,moon,fracillum,96%,Waxing Gibbous
+kuala_lumpur,101.6869,3.139,2025-08-05,sun,upper_transit,05:19,Upper Transit
+kuala_lumpur,101.6869,3.139,2025-08-05,sun,set,11:27,Set
+kuala_lumpur,101.6869,3.139,2025-08-05,sun,civil_twilight_end,11:48,End Civil Twilight
+kuala_lumpur,101.6869,3.139,2025-08-05,sun,civil_twilight_begin,22:50,Begin Civil Twilight
+kuala_lumpur,101.6869,3.139,2025-08-05,sun,rise,23:12,Rise
+kuala_lumpur,101.6869,3.139,2025-08-05,moon,rise,08:03,Rise
+kuala_lumpur,101.6869,3.139,2025-08-05,moon,upper_transit,14:09,Upper Transit
+kuala_lumpur,101.6869,3.139,2025-08-05,moon,set,20:15,Set
+kuala_lumpur,101.6869,3.139,2025-08-05,moon,fracillum,85%,Waxing Gibbous
+kuala_lumpur,101.6869,3.139,2025-11-01,sun,upper_transit,04:57,Upper Transit
+kuala_lumpur,101.6869,3.139,2025-11-01,sun,set,10:57,Set
+kuala_lumpur,101.6869,3.139,2025-11-01,sun,civil_twilight_end,11:18,End Civil Twilight
+kuala_lumpur,101.6869,3.139,2025-11-01,sun,civil_twilight_begin,22:35,Begin Civil Twilight
+kuala_lumpur,101.6869,3.139,2025-11-01,sun,rise,22:57,Rise
+kuala_lumpur,101.6869,3.139,2025-11-01,moon,rise,07:23,Rise
+kuala_lumpur,101.6869,3.139,2025-11-01,moon,upper_transit,13:33,Upper Transit
+kuala_lumpur,101.6869,3.139,2025-11-01,moon,set,19:43,Set
+kuala_lumpur,101.6869,3.139,2025-11-01,moon,fracillum,78%,Waxing Gibbous
+kuala_lumpur,101.6869,3.139,2026-01-20,sun,upper_transit,05:24,Upper Transit
+kuala_lumpur,101.6869,3.139,2026-01-20,sun,set,11:23,Set
+kuala_lumpur,101.6869,3.139,2026-01-20,sun,civil_twilight_end,11:45,End Civil Twilight
+kuala_lumpur,101.6869,3.139,2026-01-20,sun,civil_twilight_begin,23:03,Begin Civil Twilight
+kuala_lumpur,101.6869,3.139,2026-01-20,sun,rise,23:25,Rise
+kuala_lumpur,101.6869,3.139,2026-01-20,moon,rise,00:28,Rise
+kuala_lumpur,101.6869,3.139,2026-01-20,moon,upper_transit,06:35,Upper Transit
+kuala_lumpur,101.6869,3.139,2026-01-20,moon,set,12:42,Set
+kuala_lumpur,101.6869,3.139,2026-01-20,moon,fracillum,3%,Waxing Crescent
+los_angeles,-118.2437,34.0522,2024-01-15,sun,set,01:06,Set
+los_angeles,-118.2437,34.0522,2024-01-15,sun,civil_twilight_end,01:33,End Civil Twilight
+los_angeles,-118.2437,34.0522,2024-01-15,sun,civil_twilight_begin,14:31,Begin Civil Twilight
+los_angeles,-118.2437,34.0522,2024-01-15,sun,rise,14:58,Rise
+los_angeles,-118.2437,34.0522,2024-01-15,sun,upper_transit,20:02,Upper Transit
+los_angeles,-118.2437,34.0522,2024-01-15,moon,set,05:05,Set
+los_angeles,-118.2437,34.0522,2024-01-15,moon,rise,18:07,Rise
+los_angeles,-118.2437,34.0522,2024-01-15,moon,fracillum,21%,Waxing Crescent
+los_angeles,-118.2437,34.0522,2024-03-20,sun,set,02:04,Set
+los_angeles,-118.2437,34.0522,2024-03-20,sun,civil_twilight_end,02:29,End Civil Twilight
+los_angeles,-118.2437,34.0522,2024-03-20,sun,civil_twilight_begin,13:31,Begin Civil Twilight
+los_angeles,-118.2437,34.0522,2024-03-20,sun,rise,13:56,Rise
+los_angeles,-118.2437,34.0522,2024-03-20,sun,upper_transit,20:00,Upper Transit
+los_angeles,-118.2437,34.0522,2024-03-20,moon,upper_transit,04:33,Upper Transit
+los_angeles,-118.2437,34.0522,2024-03-20,moon,set,11:53,Set
+los_angeles,-118.2437,34.0522,2024-03-20,moon,rise,22:06,Rise
+los_angeles,-118.2437,34.0522,2024-03-20,moon,fracillum,81%,Waxing Gibbous
+los_angeles,-118.2437,34.0522,2024-06-21,sun,set,03:08,Set
+los_angeles,-118.2437,34.0522,2024-06-21,sun,civil_twilight_end,03:37,End Civil Twilight
+los_angeles,-118.2437,34.0522,2024-06-21,sun,civil_twilight_begin,12:13,Begin Civil Twilight
+los_angeles,-118.2437,34.0522,2024-06-21,sun,rise,12:42,Rise
+los_angeles,-118.2437,34.0522,2024-06-21,sun,upper_transit,19:55,Upper Transit
+los_angeles,-118.2437,34.0522,2024-06-21,moon,rise,02:25,Rise
+los_angeles,-118.2437,34.0522,2024-06-21,moon,upper_transit,07:13,Upper Transit
+los_angeles,-118.2437,34.0522,2024-06-21,moon,set,11:59,Set
+los_angeles,-118.2437,34.0522,2024-06-21,moon,fracillum,99%,Waxing Gibbous
+los_angeles,-118.2437,34.0522,2024-09-22,sun,set,01:50,Set
+los_angeles,-118.2437,34.0522,2024-09-22,sun,civil_twilight_end,02:15,End Civil Twilight
+los_angeles,-118.2437,34.0522,2024-09-22,sun,civil_twilight_begin,13:17,Begin Civil Twilight
+los_angeles,-118.2437,34.0522,2024-09-22,sun,rise,13:42,Rise
+los_angeles,-118.2437,34.0522,2024-09-22,sun,upper_transit,19:45,Upper Transit
+los_angeles,-118.2437,34.0522,2024-09-22,moon,rise,04:12,Rise
+los_angeles,-118.2437,34.0522,2024-09-22,moon,upper_transit,11:36,Upper Transit
+los_angeles,-118.2437,34.0522,2024-09-22,moon,set,19:08,Set
+los_angeles,-118.2437,34.0522,2024-09-22,moon,fracillum,74%,Waning Gibbous
+los_angeles,-118.2437,34.0522,2024-12-21,sun,set,00:47,Set
+los_angeles,-118.2437,34.0522,2024-12-21,sun,civil_twilight_end,01:15,End Civil Twilight
+los_angeles,-118.2437,34.0522,2024-12-21,sun,civil_twilight_begin,14:27,Begin Civil Twilight
+los_angeles,-118.2437,34.0522,2024-12-21,sun,rise,14:55,Rise
+los_angeles,-118.2437,34.0522,2024-12-21,sun,upper_transit,19:51,Upper Transit
+los_angeles,-118.2437,34.0522,2024-12-21,moon,rise,06:23,Rise
+los_angeles,-118.2437,34.0522,2024-12-21,moon,upper_transit,12:58,Upper Transit
+los_angeles,-118.2437,34.0522,2024-12-21,moon,set,19:23,Set
+los_angeles,-118.2437,34.0522,2024-12-21,moon,fracillum,64%,Waning Gibbous
+los_angeles,-118.2437,34.0522,2025-02-28,sun,set,01:48,Set
+los_angeles,-118.2437,34.0522,2025-02-28,sun,civil_twilight_end,02:13,End Civil Twilight
+los_angeles,-118.2437,34.0522,2025-02-28,sun,civil_twilight_begin,13:57,Begin Civil Twilight
+los_angeles,-118.2437,34.0522,2025-02-28,sun,rise,14:22,Rise
+los_angeles,-118.2437,34.0522,2025-02-28,sun,upper_transit,20:05,Upper Transit
+los_angeles,-118.2437,34.0522,2025-02-28,moon,set,01:44,Set
+los_angeles,-118.2437,34.0522,2025-02-28,moon,rise,14:52,Rise
+los_angeles,-118.2437,34.0522,2025-02-28,moon,upper_transit,20:49,Upper Transit
+los_angeles,-118.2437,34.0522,2025-02-28,moon,fracillum,0%,New Moon
+los_angeles,-118.2437,34.0522,2025-05-10,sun,set,02:43,Set
+los_angeles,-118.2437,34.0522,2025-05-10,sun,civil_twilight_end,03:11,End Civil Twilight
+los_angeles,-118.2437,34.0522,2025-05-10,sun,civil_twilight_begin,12:28,Begin Civil Twilight
+los_angeles,-118.2437,34.0522,2025-05-10,sun,rise,12:55,Rise
+los_angeles,-118.2437,34.0522,2025-05-10,sun,upper_transit,19:49,Upper Transit
+los_angeles,-118.2437,34.0522,2025-05-10,moon,rise,00:20,Rise
+los_angeles,-118.2437,34.0522,2025-05-10,moon,upper_transit,06:02,Upper Transit
+los_angeles,-118.2437,34.0522,2025-05-10,moon,set,11:37,Set
+los_angeles,-118.2437,34.0522,2025-05-10,moon,fracillum,96%,Waxing Gibbous
+los_angeles,-118.2437,34.0522,2025-08-05,sun,set,02:51,Set
+los_angeles,-118.2437,34.0522,2025-08-05,sun,civil_twilight_end,03:18,End Civil Twilight
+los_angeles,-118.2437,34.0522,2025-08-05,sun,civil_twilight_begin,12:40,Begin Civil Twilight
+los_angeles,-118.2437,34.0522,2025-08-05,sun,rise,13:08,Rise
+los_angeles,-118.2437,34.0522,2025-08-05,sun,upper_transit,19:59,Upper Transit
+los_angeles,-118.2437,34.0522,2025-08-05,moon,upper_transit,04:28,Upper Transit
+los_angeles,-118.2437,34.0522,2025-08-05,moon,set,09:11,Set
+los_angeles,-118.2437,34.0522,2025-08-05,moon,fracillum,85%,Waxing Gibbous
+los_angeles,-118.2437,34.0522,2025-11-01,sun,set,01:01,Set
+los_angeles,-118.2437,34.0522,2025-11-01,sun,civil_twilight_end,01:26,End Civil Twilight
+los_angeles,-118.2437,34.0522,2025-11-01,sun,civil_twilight_begin,13:47,Begin Civil Twilight
+los_angeles,-118.2437,34.0522,2025-11-01,sun,rise,14:13,Rise
+los_angeles,-118.2437,34.0522,2025-11-01,sun,upper_transit,19:37,Upper Transit
+los_angeles,-118.2437,34.0522,2025-11-01,moon,upper_transit,03:54,Upper Transit
+los_angeles,-118.2437,34.0522,2025-11-01,moon,set,09:45,Set
+los_angeles,-118.2437,34.0522,2025-11-01,moon,rise,22:41,Rise
+los_angeles,-118.2437,34.0522,2025-11-01,moon,fracillum,78%,Waxing Gibbous
+los_angeles,-118.2437,34.0522,2026-01-20,sun,set,01:11,Set
+los_angeles,-118.2437,34.0522,2026-01-20,sun,civil_twilight_end,01:38,End Civil Twilight
+los_angeles,-118.2437,34.0522,2026-01-20,sun,civil_twilight_begin,14:30,Begin Civil Twilight
+los_angeles,-118.2437,34.0522,2026-01-20,sun,rise,14:57,Rise
+los_angeles,-118.2437,34.0522,2026-01-20,sun,upper_transit,20:04,Upper Transit
+los_angeles,-118.2437,34.0522,2026-01-20,moon,set,02:13,Set
+los_angeles,-118.2437,34.0522,2026-01-20,moon,rise,16:17,Rise
+los_angeles,-118.2437,34.0522,2026-01-20,moon,upper_transit,21:43,Upper Transit
+los_angeles,-118.2437,34.0522,2026-01-20,moon,fracillum,3%,Waxing Crescent
+tromso,18.956,69.6496,2024-01-15,sun,civil_twilight_begin,07:59,Begin Civil Twilight
+tromso,18.956,69.6496,2024-01-15,sun,rise,10:45,Rise
+tromso,18.956,69.6496,2024-01-15,sun,upper_transit,10:53,Upper Transit
+tromso,18.956,69.6496,2024-01-15,sun,set,11:03,Set
+tromso,18.956,69.6496,2024-01-15,sun,civil_twilight_end,13:49,End Civil Twilight
+tromso,18.956,69.6496,2024-01-15,moon,rise,09:47,Rise
+tromso,18.956,69.6496,2024-01-15,moon,upper_transit,14:38,Upper Transit
+tromso,18.956,69.6496,2024-01-15,moon,set,20:04,Set
+tromso,18.956,69.6496,2024-01-15,moon,fracillum,21%,Waxing Crescent
+tromso,18.956,69.6496,2024-03-20,sun,civil_twilight_begin,03:42,Begin Civil Twilight
+tromso,18.956,69.6496,2024-03-20,sun,rise,04:42,Rise
+tromso,18.956,69.6496,2024-03-20,sun,upper_transit,10:51,Upper Transit
+tromso,18.956,69.6496,2024-03-20,sun,set,17:03,Set
+tromso,18.956,69.6496,2024-03-20,sun,civil_twilight_end,18:04,End Civil Twilight
+tromso,18.956,69.6496,2024-03-20,moon,continuously_above_horizon,,Object continuously above the Horizon
+tromso,18.956,69.6496,2024-03-20,moon,lower_transit,07:30,Lower Transit
+tromso,18.956,69.6496,2024-03-20,moon,upper_transit,19:53,Upper Transit
+tromso,18.956,69.6496,2024-03-20,moon,fracillum,81%,Waxing Gibbous
+tromso,18.956,69.6496,2024-06-21,sun,continuously_above_horizon,,Object continuously above the Horizon
+tromso,18.956,69.6496,2024-06-21,sun,continuously_above_twilight_limit,,Object continuously above the Twilight Limit
+tromso,18.956,69.6496,2024-06-21,sun,upper_transit,10:46,Upper Transit
+tromso,18.956,69.6496,2024-06-21,sun,lower_transit,22:46,Lower Transit
+tromso,18.956,69.6496,2024-06-21,moon,continuously_below_horizon,,Object continuously below the Horizon
+tromso,18.956,69.6496,2024-06-21,moon,fracillum,99%,Waxing Gibbous
+tromso,18.956,69.6496,2024-09-22,sun,civil_twilight_begin,03:25,Begin Civil Twilight
+tromso,18.956,69.6496,2024-09-22,sun,rise,04:26,Rise
+tromso,18.956,69.6496,2024-09-22,sun,upper_transit,10:37,Upper Transit
+tromso,18.956,69.6496,2024-09-22,sun,set,16:46,Set
+tromso,18.956,69.6496,2024-09-22,sun,civil_twilight_end,17:46,End Civil Twilight
+tromso,18.956,69.6496,2024-09-22,moon,continuously_above_horizon,,Object continuously above the Horizon
+tromso,18.956,69.6496,2024-09-22,moon,upper_transit,02:05,Upper Transit
+tromso,18.956,69.6496,2024-09-22,moon,lower_transit,14:34,Lower Transit
+tromso,18.956,69.6496,2024-09-22,moon,fracillum,74%,Waning Gibbous
+tromso,18.956,69.6496,2024-12-21,sun,continuously_below_horizon,,Object continuously below the Horizon
+tromso,18.956,69.6496,2024-12-21,sun,civil_twilight_begin,08:32,Begin Civil Twilight
+tromso,18.956,69.6496,2024-12-21,sun,civil_twilight_end,12:53,End Civil Twilight
+tromso,18.956,69.6496,2024-12-21,moon,upper_transit,03:33,Upper Transit
+tromso,18.956,69.6496,2024-12-21,moon,set,11:10,Set
+tromso,18.956,69.6496,2024-12-21,moon,rise,21:04,Rise
+tromso,18.956,69.6496,2024-12-21,moon,fracillum,64%,Waning Gibbous
+tromso,18.956,69.6496,2025-02-28,sun,civil_twilight_begin,05:13,Begin Civil Twilight
+tromso,18.956,69.6496,2025-02-28,sun,rise,06:14,Rise
+tromso,18.956,69.6496,2025-02-28,sun,upper_transit,10:57,Upper Transit
+tromso,18.956,69.6496,2025-02-28,sun,set,15:41,Set
+tromso,18.956,69.6496,2025-02-28,sun,civil_twilight_end,16:43,End Civil Twilight
+tromso,18.956,69.6496,2025-02-28,moon,rise,06:39,Rise
+tromso,18.956,69.6496,2025-02-28,moon,upper_transit,11:21,Upper Transit
+tromso,18.956,69.6496,2025-02-28,moon,set,16:36,Set
+tromso,18.956,69.6496,2025-02-28,moon,fracillum,0%,New Moon
+tromso,18.956,69.6496,2025-05-10,sun,continuously_above_twilight_limit,,Object continuously above the Twilight Limit
+tromso,18.956,69.6496,2025-05-10,sun,rise,00:24,Rise
+tromso,18.956,69.6496,2025-05-10,sun,upper_transit,10:41,Upper Transit
+tromso,18.956,69.6496,2025-05-10,sun,set,21:04,Set
+tromso,18.956,69.6496,2025-05-10,moon,set,00:50,Set
+tromso,18.956,69.6496,2025-05-10,moon,rise,17:59,Rise
+tromso,18.956,69.6496,2025-05-10,moon,upper_transit,21:18,Upper Transit
+tromso,18.956,69.6496,2025-05-10,moon,fracillum,96%,Waxing Gibbous
+tromso,18.956,69.6496,2025-08-05,sun,continuously_above_twilight_limit,,Object continuously above the Twilight Limit
+tromso,18.956,69.6496,2025-08-05,sun,rise,00:51,Rise
+tromso,18.956,69.6496,2025-08-05,sun,upper_transit,10:50,Upper Transit
+tromso,18.956,69.6496,2025-08-05,sun,set,20:44,Set
+tromso,18.956,69.6496,2025-08-05,moon,continuously_below_horizon,,Object continuously below the Horizon
+tromso,18.956,69.6496,2025-08-05,moon,fracillum,85%,Waxing Gibbous
+tromso,18.956,69.6496,2025-11-01,sun,civil_twilight_begin,05:59,Begin Civil Twilight
+tromso,18.956,69.6496,2025-11-01,sun,rise,07:12,Rise
+tromso,18.956,69.6496,2025-11-01,sun,upper_transit,10:28,Upper Transit
+tromso,18.956,69.6496,2025-11-01,sun,set,13:43,Set
+tromso,18.956,69.6496,2025-11-01,sun,civil_twilight_end,14:55,End Civil Twilight
+tromso,18.956,69.6496,2025-11-01,moon,rise,14:13,Rise
+tromso,18.956,69.6496,2025-11-01,moon,upper_transit,19:14,Upper Transit
+tromso,18.956,69.6496,2025-11-01,moon,fracillum,78%,Waxing Gibbous
+tromso,18.956,69.6496,2026-01-20,sun,civil_twilight_begin,07:42,Begin Civil Twilight
+tromso,18.956,69.6496,2026-01-20,sun,rise,09:36,Rise
+tromso,18.956,69.6496,2026-01-20,sun,upper_transit,10:55,Upper Transit
+tromso,18.956,69.6496,2026-01-20,sun,set,12:15,Set
+tromso,18.956,69.6496,2026-01-20,sun,civil_twilight_end,14:09,End Civil Twilight
+tromso,18.956,69.6496,2026-01-20,moon,rise,09:55,Rise
+tromso,18.956,69.6496,2026-01-20,moon,upper_transit,12:17,Upper Transit
+tromso,18.956,69.6496,2026-01-20,moon,set,15:00,Set
+tromso,18.956,69.6496,2026-01-20,moon,fracillum,3%,Waxing Crescent
+tromso,18.956,69.6496,2024-05-20,sun,continuously_above_horizon,,Object continuously above the Horizon
+tromso,18.956,69.6496,2024-05-20,sun,continuously_above_twilight_limit,,Object continuously above the Twilight Limit
+tromso,18.956,69.6496,2024-05-20,sun,upper_transit,10:41,Upper Transit
+tromso,18.956,69.6496,2024-05-20,sun,lower_transit,22:41,Lower Transit
+tromso,18.956,69.6496,2024-05-20,moon,set,00:34,Set
+tromso,18.956,69.6496,2024-05-20,moon,rise,16:41,Rise
+tromso,18.956,69.6496,2024-05-20,moon,upper_transit,20:34,Upper Transit
+tromso,18.956,69.6496,2024-05-20,moon,fracillum,91%,Waxing Gibbous
+tromso,18.956,69.6496,2024-07-25,sun,continuously_above_twilight_limit,,Object continuously above the Twilight Limit
+tromso,18.956,69.6496,2024-07-25,sun,upper_transit,10:51,Upper Transit
+tromso,18.956,69.6496,2024-07-25,sun,set,22:23,Set
+tromso,18.956,69.6496,2024-07-25,sun,rise,23:20,Rise
+tromso,18.956,69.6496,2024-07-25,moon,upper_transit,02:05,Upper Transit
+tromso,18.956,69.6496,2024-07-25,moon,set,07:44,Set
+tromso,18.956,69.6496,2024-07-25,moon,rise,20:33,Rise
+tromso,18.956,69.6496,2024-07-25,moon,fracillum,79%,Waning Gibbous
+tromso,18.956,69.6496,2024-11-25,sun,civil_twilight_begin,07:31,Begin Civil Twilight
+tromso,18.956,69.6496,2024-11-25,sun,rise,09:49,Rise
+tromso,18.956,69.6496,2024-11-25,sun,upper_transit,10:31,Upper Transit
+tromso,18.956,69.6496,2024-11-25,sun,set,11:12,Set
+tromso,18.956,69.6496,2024-11-25,sun,civil_twilight_end,13:31,End Civil Twilight
+tromso,18.956,69.6496,2024-11-25,moon,upper_transit,06:17,Upper Transit
+tromso,18.956,69.6496,2024-11-25,moon,set,12:28,Set
+tromso,18.956,69.6496,2024-11-25,moon,fracillum,28%,Waning Crescent
+tromso,18.956,69.6496,2025-01-17,sun,civil_twilight_begin,07:51,Begin Civil Twilight
+tromso,18.956,69.6496,2025-01-17,sun,rise,09:59,Rise
+tromso,18.956,69.6496,2025-01-17,sun,upper_transit,10:54,Upper Transit
+tromso,18.956,69.6496,2025-01-17,sun,set,11:50,Set
+tromso,18.956,69.6496,2025-01-17,sun,civil_twilight_end,13:59,End Civil Twilight
+tromso,18.956,69.6496,2025-01-17,moon,upper_transit,01:26,Upper Transit
+tromso,18.956,69.6496,2025-01-17,moon,set,09:32,Set
+tromso,18.956,69.6496,2025-01-17,moon,rise,18:29,Rise
+tromso,18.956,69.6496,2025-01-17,moon,fracillum,87%,Waning Gibbous
