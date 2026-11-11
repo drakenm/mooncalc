@@ -156,8 +156,10 @@ impl Body {
 /// A geocentric apparent place of date.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ApparentPlace {
-    /// Right ascension and declination of date; distance is the
-    /// light-time-corrected geocentric range, km.
+    /// Right ascension and declination of date. `distance_km` is the
+    /// **geometric** geocentric distance at the instant (no light time), the
+    /// convention shared with `MeeusEphemeris` and the one parallax and
+    /// semi-diameters need. The light-time range is `light_time_s × c`.
     pub equatorial: Equatorial,
     /// Ecliptic longitude and latitude of date, same distance.
     pub ecliptic: Ecliptic,
@@ -382,8 +384,17 @@ impl De440Ephemeris {
 
     fn place(&self, body: Body, f: &EpochFrame) -> Result<ApparentPlace, SpkError> {
         let (p, light_time_s) = self.light_time_vector(body, f)?;
-        let dist = norm(&p);
-        let u = aberrate(&p.map(|x| x / dist), &f.earth_beta);
+        let range = norm(&p);
+        let u = aberrate(&p.map(|x| x / range), &f.earth_beta);
+        // Geometric distance at the epoch itself (no light time).
+        let b = self
+            .spk
+            .position(body.naif_id(), naif::SOLAR_SYSTEM_BARYCENTER, f.et)?;
+        let dist = norm(&[
+            b[0] - f.earth_pos[0],
+            b[1] - f.earth_pos[1],
+            b[2] - f.earth_pos[2],
+        ]);
         let r = matrix::apply(&f.to_true, &u);
         let (ra, dec, _) = matrix::to_spherical(&r);
         let (lon, lat, _) = matrix::to_spherical(&matrix::apply(&rot_x(f.eps), &r));

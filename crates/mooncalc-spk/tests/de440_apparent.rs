@@ -180,11 +180,14 @@ fn iau2006_matches_horizons_apparent() {
     let mut stats: [[Vec<f64>; 3]; 4] = Default::default(); // [in/out × body][ra, dec, dist]
     eprintln!("body  jd_tt              dRA·cosδ  dDec (mas, RA origin −53 mas removed)  dist (m)");
     for r in rows_in(&eph) {
-        let p = eph.apparent(r.body, r.jd_tt).unwrap().equatorial;
+        let place = eph.apparent(r.body, r.jd_tt).unwrap();
+        let p = place.equatorial;
+        // Horizons' delta is the light-time range, not the geometric distance.
+        let range_km = place.light_time_s * mooncalc_spk::de440::C_KM_S;
         let inside = EOP_WINDOW.contains(&r.jd_tt);
         let dra = (mas(wrap(p.ra - r.ra)) + HORIZONS_RA_ORIGIN_MAS) * r.dec.cos();
         let ddec = mas(p.dec - r.dec);
-        let dd = (p.distance_km - r.delta_km) * 1e3;
+        let dd = (range_km - r.delta_km) * 1e3;
         eprintln!(
             "{:<5} {:>16.6} {:>9.2} {:>9.2} {:>9.3}{}",
             format!("{:?}", r.body),
@@ -284,9 +287,10 @@ fn iau1976_matches_horizons_up_to_fixed_eop_offsets() {
 
 /// The Meeus backend against DE440 over 1900–2100, every 7.3 days with a
 /// varying time of day. The core documents the Sun to about 1″ and the
-/// Moon to about 10″ in longitude and 4″ in latitude. Meeus's truncated
-/// ELP-2000/82 distance series is good to a few tens of km: his own example
-/// 47.a gives 368 409.7 km where Horizons has 368 439.4 km.
+/// Moon to about 10″ in longitude and 4″ in latitude. Both backends report
+/// geometric distance, so the Moon distances agree to a few km (Horizons'
+/// 368 439.4 km for Meeus 47.a is the light-time range; geometric it is
+/// 368 405.5 km against Meeus's 368 409.7 km).
 #[test]
 fn meeus_cross_check() {
     let Some(path) = kernel_path() else { return };
@@ -346,7 +350,7 @@ fn meeus_cross_check() {
     // Generous bounds: the point of the test is the printed distribution.
     assert!(s[0] < 3.0 && s[1] < 1.0, "Sun {} {}", s[0], s[1]);
     assert!(s[2] < 40.0 && s[3] < 15.0, "Moon {} {}", s[2], s[3]);
-    assert!(s[4] < 300.0 && s[5] < 80.0, "distances {} {}", s[4], s[5]);
+    assert!(s[4] < 300.0 && s[5] < 15.0, "distances {} {}", s[4], s[5]);
 }
 
 #[test]

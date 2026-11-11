@@ -8,8 +8,9 @@ use crate::coords::{Ecliptic, Equatorial};
 /// Every method takes a Julian Day in **TT** (TDB is treated as equal to TT;
 /// the difference is < 2 ms). Returned positions are **geocentric apparent**:
 /// corrected for light time, aberration (Sun), and nutation, referred to the
-/// true equator/ecliptic and equinox of date. Topocentric corrections are the
-/// caller's job (see `coords`).
+/// true equator/ecliptic and equinox of date. Distances are **geometric**
+/// (no light time), as parallax and semi-diameters require. Topocentric
+/// corrections are the caller's job (see `coords`).
 pub trait Ephemeris: Send + Sync {
     /// Short human-readable name, e.g. "Meeus/ELP-2000 (truncated)".
     fn name(&self) -> &str;
