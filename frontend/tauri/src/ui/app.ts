@@ -3,6 +3,8 @@
 import type { AppInfo, Backend, CriterionInfo } from '../backend';
 import type { Store } from '../state';
 import { createAbout } from './about';
+import { CalendarView } from './calendar-view';
+import { EphemerisView } from './ephemeris-view';
 import { createEarliestView } from './earliest-view';
 import { h } from './dom';
 import { MapView } from './map-view';
@@ -20,6 +22,9 @@ interface Tab {
 }
 
 const TAB_KEY = 'mooncalc.tab';
+
+/** The panel and activation hook of a view object. */
+const view = (v: { el: HTMLElement; setActive(a: boolean): void }) => ({ panel: v.el, setActive: (a: boolean) => v.setActive(a) });
 
 export interface AppContext {
   backend: Backend;
@@ -65,8 +70,8 @@ export function createApp(ctx: AppContext): HTMLElement {
         },
       }),
     },
-    { id: 'ephemeris', label: 'Ephemeris', panel: createPlaceholder(PLACEHOLDERS.ephemeris) },
-    { id: 'calendar', label: 'Calendar', panel: createPlaceholder(PLACEHOLDERS.calendar) },
+    { id: 'ephemeris', label: 'Ephemeris', ...view(new EphemerisView(ctx)) },
+    { id: 'calendar', label: 'Calendar', ...view(new CalendarView(ctx)) },
     { id: 'sky', label: 'Sky', panel: createPlaceholder(PLACEHOLDERS.sky) },
     { id: 'moon', label: 'Moon', panel: createPlaceholder(PLACEHOLDERS.moon) },
     { id: 'trajectory', label: 'Trajectory', panel: createPlaceholder(PLACEHOLDERS.trajectory) },

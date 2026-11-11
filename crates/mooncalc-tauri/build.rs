@@ -25,6 +25,17 @@ const COMMANDS: &[&str] = &[
     "earliest_sighting",
     "basemap",
     "load_de440",
+    "calendar_list",
+    "calendar_month_starts",
+    "calendar_month",
+    "calendar_convert",
+    "calendar_compare",
+    "ephemeris_table",
+    "rise_set_month",
+    "lunar_phases",
+    "apsides_nodes",
+    "eclipses",
+    "seasons",
 ];
 
 const PLACEHOLDER: &str = r#"<!doctype html>

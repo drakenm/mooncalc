@@ -15,6 +15,8 @@
 //! | [`atlas`] | [`atlas::search_cities`], [`atlas::nearest_city`] |
 //! | [`earliest`] | [`earliest::EarliestJob`]: earliest-sighting scan after a conjunction |
 //! | [`basemap`] | [`basemap::basemap`]: simplified coastlines and borders |
+//! | [`calendar`] | [`calendar::CalendarEngine`]: Hijri calendars, month views, converter, month-start comparison |
+//! | [`tables`] | [`tables::ephemeris_table`], rise/set, phases, apsides and nodes, eclipses, seasons |
 //!
 //! # Portability
 //!
@@ -26,6 +28,7 @@
 
 pub mod atlas;
 pub mod basemap;
+pub mod calendar;
 pub mod codec;
 pub mod criteria;
 pub mod dto;
@@ -34,6 +37,7 @@ pub mod ephemeris;
 pub mod info;
 pub mod map;
 pub mod report;
+pub mod tables;
 pub mod validate;
 
 #[cfg(test)]

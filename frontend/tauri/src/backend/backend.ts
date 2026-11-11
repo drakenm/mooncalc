@@ -29,11 +29,17 @@ import type {
   PngImage,
   SavedFile,
 } from './types';
+import type { CalendarApi } from './types-calendar';
+import type { TablesApi } from './types-tables';
 
 export type BackendKind = 'tauri' | 'wasm' | 'mock';
 
 export interface Backend {
   readonly kind: BackendKind;
+  /** Hijri calendars (Calendar tab). */
+  readonly calendar: CalendarApi;
+  /** Ephemeris tables and event lists (Ephemeris tab). */
+  readonly tables: TablesApi;
   appInfo(): Promise<AppInfo>;
   criteriaList(): Promise<CriterionInfo[]>;
   computeVisibilityMap(params: MapParams): Promise<MapResult>;

@@ -7,6 +7,7 @@
 
 import { BackendError, type Backend } from './backend';
 import { bytesToBase64 } from './codec';
+import { mockCalendarApi, mockTablesApi } from './mock-extras';
 import {
   NO_DATA,
   type AppInfo,
@@ -127,6 +128,8 @@ function emptyCrescent(crescent: 'evening' | 'morning'): CrescentReport {
 
 export class MockBackend implements Backend {
   readonly kind = 'mock' as const;
+  readonly calendar = mockCalendarApi;
+  readonly tables = mockTablesApi;
 
   async appInfo(): Promise<AppInfo> {
     return {
