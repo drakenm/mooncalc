@@ -35,7 +35,16 @@ impl MoonCalcApp {
             .and_then(|s| eframe::get_value::<Settings>(s, SETTINGS_KEY))
             .unwrap_or_default()
             .on_startup();
-        Self::with_settings(settings)
+        let mut app = Self::with_settings(settings);
+        let user_atlas_json = cc
+            .storage
+            .and_then(|s| s.get_string(crate::location::USER_ATLAS_KEY));
+        app.ui_state
+            .inputs
+            .load_user_atlas(user_atlas_json.as_deref());
+        let ctx = cc.egui_ctx.clone();
+        crate::location::warm_atlas(move || ctx.request_repaint());
+        app
     }
 
     /// Create the app with the given settings (no storage).
@@ -129,5 +138,9 @@ impl eframe::App for MoonCalcApp {
 
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         eframe::set_value(storage, SETTINGS_KEY, &self.settings);
+        storage.set_string(
+            crate::location::USER_ATLAS_KEY,
+            self.ui_state.inputs.user_atlas_json(),
+        );
     }
 }
