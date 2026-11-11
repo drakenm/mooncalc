@@ -22,6 +22,8 @@
 //! * [`illumination`] — elongation, phase angle, illuminated fraction,
 //!   bright-limb position angle.
 //! * [`meeus`] — the default [`Ephemeris`]: VSOP87D Sun and ELP-2000/82 Moon.
+//! * [`events`] — rise/set/transit, twilight and lunar phases, for any
+//!   ephemeris.
 //!
 //! The crate has no dependencies and no I/O, threads or clocks in its
 //! default paths, so it builds for `wasm32-unknown-unknown`.
@@ -30,6 +32,7 @@ pub mod angle;
 pub mod coords;
 pub mod deltat;
 pub mod ephemeris;
+pub mod events;
 pub mod illumination;
 pub mod matrix;
 pub mod meeus;
