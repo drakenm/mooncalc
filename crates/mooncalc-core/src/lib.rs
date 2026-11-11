@@ -32,6 +32,7 @@ pub mod coords;
 pub mod deltat;
 pub mod ephemeris;
 pub mod illumination;
+pub mod libration;
 pub mod matrix;
 pub mod meeus;
 pub mod nodes;
