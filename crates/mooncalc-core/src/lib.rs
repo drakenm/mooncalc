@@ -32,6 +32,7 @@ pub mod deltat;
 pub mod ephemeris;
 pub mod illumination;
 pub mod matrix;
+pub mod meeus;
 pub mod nutation;
 pub mod precession;
 pub mod refraction;
@@ -41,6 +42,7 @@ pub mod transform;
 
 pub use coords::{Ecliptic, Equatorial, GeoLocation, Horizontal};
 pub use ephemeris::Ephemeris;
+pub use meeus::{MeeusEphemeris, SunSeries};
 pub use nutation::NutationObliquity;
 pub use refraction::Atmosphere;
 pub use time::{CalendarDateTime, Instant, Weekday};
