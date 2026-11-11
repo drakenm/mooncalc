@@ -400,6 +400,21 @@ mod tests {
     use crate::time::julian_day;
 
     #[test]
+    fn node_search_ends_outside_the_ephemeris_range() {
+        // Refining against NaN positions used to yield a NaN instant, which
+        // never compares > the start, so next/previous looped forever. They
+        // now fall back to the Meeus ch. 51 instant.
+        let t = julian_day(2024, 3, 11.0);
+        let eph = crate::test_support::Clipped::new(t - 1.0, t + 1.0);
+        let next = next_node_passage(Some(&eph), t, None);
+        assert!(next.jd_tt.is_finite() && next.jd_tt > t, "{next:?}");
+        let k = node_number_near(next.jd_tt, next.kind);
+        assert_eq!(next, node_passage_meeus(k));
+        let all = node_passages_between(Some(&eph), t - 40.0, t + 40.0);
+        assert!(all.iter().all(|n| n.jd_tt.is_finite()));
+    }
+
+    #[test]
     fn meeus_51a() {
         // Ascending node of 1987 May: k = −170, JDE = 2446938.76803
         // (1987 May 23, 6h26m TD).

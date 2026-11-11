@@ -225,6 +225,8 @@ pub fn previous_phase(eph: &(impl Ephemeris + ?Sized), phase: Phase, t: Instant)
 }
 
 /// Every principal phase in `[t0, t1)`, in time order.
+///
+/// Phases where `eph` returns NaN (outside its valid range) are left out.
 pub fn phases_between(
     eph: &(impl Ephemeris + ?Sized),
     t0: Instant,
@@ -237,6 +239,15 @@ pub fn phases_between(
         for phase in Phase::ALL {
             let jde = meeus_phase_jde(k + phase.fraction());
             let t = Instant::from_jd_tt(phase_near_tt(eph, phase, jde));
+            if t.jd_ut.is_nan() {
+                // Outside the ephemeris range. A NaN never compares `>=`
+                // the end, so stop on the Meeus estimate instead (within
+                // hours of the true phase).
+                if jde > t1.jd_tt() + 1.0 {
+                    return out;
+                }
+                continue;
+            }
             if t.jd_ut >= t1.jd_ut {
                 return out;
             }
@@ -306,5 +317,19 @@ mod tests {
         assert_eq!(all.len(), 8);
         assert_eq!(all[0].0, Phase::FirstQuarter);
         assert!(all.windows(2).all(|w| w[0].1.jd_ut < w[1].1.jd_ut));
+    }
+
+    #[test]
+    fn phases_between_ends_outside_the_ephemeris_range() {
+        // Before the fix a NaN phase never compared >= the end, so the loop
+        // never returned (the Sky tab asks for ±2 months around its date).
+        let t = Instant::from_calendar(2024, 3, 11, 0, 0, 0.0);
+        let eph = crate::test_support::Clipped::new(t.jd_tt() - 20.0, t.jd_tt() + 20.0);
+        let all = phases_between(&eph, t.add_days(-60.0), t.add_days(60.0));
+        // Only the phases inside the covered span, in order.
+        assert!((3..=6).contains(&all.len()), "{all:?}");
+        assert!(all.iter().all(|(_, p)| p.jd_ut.is_finite()));
+        assert!(all.windows(2).all(|w| w[0].1.jd_ut < w[1].1.jd_ut));
+        assert!(phases_between(&eph, t.add_days(100.0), t.add_days(200.0)).is_empty());
     }
 }

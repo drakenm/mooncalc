@@ -270,6 +270,16 @@ impl<'a> ZoneSampler<'a> {
 
     fn sample_field(&self, field: ZoneField<'_>, u: f64, v: f64) -> Premul {
         let (cells, w, tx, ty) = self.corners(u, v);
+        // A cell with a zone but no finite value (e.g. lag +∞ where the Moon
+        // does not set) cannot be interpolated; draw its neighbourhood from
+        // the zones rather than as "no crescent".
+        let zone_without_value = cells.iter().any(|&(r, c)| {
+            let idx = r * self.grid.cols + c;
+            self.grid.cells[idx].is_some() && !field.values[idx].is_finite()
+        });
+        if zone_without_value {
+            return self.sample_vote(u, v);
+        }
         let mut vals = [f32::NAN; 4];
         let (mut wsum, mut vsum) = (0f32, 0f32);
         for (k, &(r, c)) in cells.iter().enumerate() {

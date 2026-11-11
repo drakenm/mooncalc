@@ -528,6 +528,77 @@ mod tests {
     }
 
     #[test]
+    fn rendered_cell_centres_show_the_evaluated_zone() {
+        // End to end: at every cell centre the contoured raster must show
+        // the zone the criterion returned there (or the "no crescent"
+        // colour for `None`), including Moon-always-up cells whose value is
+        // lag = +∞ ("moonset after sunset", "minimum lag").
+        use crate::projection::Equirectangular;
+        use crate::render::{MapData, RenderOptions, render_raster};
+        use mooncalc_visibility::criteria::{MinimumLag, MoonsetAfterSunset};
+        let eph = MeeusEphemeris::new();
+        let grid = world(6.0);
+        const NONE: [u8; 3] = [1, 2, 3];
+        let criteria: [&dyn Criterion; 5] = [
+            &Yallop,
+            &Odeh,
+            &Danjon::default(),
+            &MoonsetAfterSunset,
+            &MinimumLag::default(),
+        ];
+        for criterion in criteria {
+            for date in [
+                CalendarDate::new(2024, 3, 11),
+                CalendarDate::new(2024, 6, 7),
+            ] {
+                let ctx = EngineContext::new(&eph, criterion, &grid, date, Sighting::Evening);
+                let map = evaluate_map(&ctx, |_, _| true).unwrap();
+                let palette: Vec<[u8; 3]> = criterion.zones().iter().map(|z| z.rgb).collect();
+                let data = MapData {
+                    grid: &map.grid,
+                    palette: &palette,
+                    none_color: Some(NONE),
+                    field: map.field.zone_field(),
+                };
+                assert!(data.field.is_some(), "{}", criterion.id());
+                // An odd pixel count puts a pixel centre exactly on each cell centre.
+                let (px_per_cell, w, h) = (9, grid.cols as u32 * 9, grid.rows as u32 * 9);
+                let opts = RenderOptions {
+                    projection: Equirectangular::from_grid(&grid).into(),
+                    width: w,
+                    height: h,
+                    zone_opacity: 1.0,
+                    antialias: false,
+                    coastlines: None,
+                    borders: None,
+                    graticule: None,
+                    frame: None,
+                    ..RenderOptions::default()
+                };
+                let img = render_raster(&data, &opts);
+                for row in 0..grid.rows {
+                    for col in 0..grid.cols {
+                        let want = map.grid.get(row, col).map_or(NONE, |z| palette[z as usize]);
+                        let p = img.pixel(
+                            col as u32 * px_per_cell + px_per_cell / 2,
+                            row as u32 * px_per_cell + px_per_cell / 2,
+                        );
+                        assert_eq!(
+                            [p[0], p[1], p[2]],
+                            want,
+                            "{} {date:?} cell {:?} status {:?} value {:?}",
+                            criterion.id(),
+                            grid.cell_center(row, col),
+                            map.field.status(row, col),
+                            map.field.values[row * grid.cols + col],
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
     fn thresholds() {
         assert_eq!(field_thresholds(&Yallop).unwrap().len(), 5);
         assert_eq!(field_thresholds(&Danjon::default()), Some(vec![0.0]));

@@ -57,6 +57,8 @@ pub mod refraction;
 pub(crate) mod search;
 pub mod seasons;
 pub mod tables;
+#[cfg(test)]
+mod test_support;
 pub mod time;
 pub mod topocentric;
 pub mod transform;
