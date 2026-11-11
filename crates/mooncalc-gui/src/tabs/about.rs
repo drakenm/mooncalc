@@ -38,25 +38,19 @@ impl AboutTab {
 
             ui.add_space(12.0);
             ui.heading("Credits");
-            egui::Grid::new("attributions")
-                .num_columns(2)
-                .striped(true)
-                .spacing([16.0, 6.0])
-                .show(ui, |ui| {
-                    for a in ATTRIBUTIONS {
-                        ui.vertical(|ui| {
-                            ui.strong(a.name);
-                            ui.weak(a.license);
-                        });
-                        ui.vertical(|ui| {
-                            ui.add(egui::Label::new(a.usage).wrap());
-                            if let Some(url) = a.url {
-                                ui.hyperlink(url);
-                            }
-                        });
-                        ui.end_row();
-                    }
+            // One stacked entry per credit: a two-column grid squeezes the
+            // names when the usage text is long.
+            for a in ATTRIBUTIONS {
+                ui.horizontal_wrapped(|ui| {
+                    ui.strong(a.name);
+                    ui.weak(format!("· {}", a.license));
                 });
+                ui.add(egui::Label::new(a.usage).wrap());
+                if let Some(url) = a.url {
+                    ui.hyperlink(url);
+                }
+                ui.add_space(8.0);
+            }
 
             ui.add_space(12.0);
             ui.heading("Licence");
