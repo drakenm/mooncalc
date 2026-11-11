@@ -3092,6 +3092,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "mooncalc-app"
+version = "0.1.0"
+dependencies = [
+ "mooncalc-atlas",
+ "mooncalc-core",
+ "mooncalc-maps",
+ "mooncalc-spk",
+ "mooncalc-visibility",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "mooncalc-atlas"
 version = "0.1.0"
 dependencies = [

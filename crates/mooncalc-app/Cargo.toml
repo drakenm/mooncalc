@@ -1,0 +1,23 @@
+[package]
+name = "mooncalc-app"
+description = "Frontend-agnostic MoonCalc application services (maps, reports, atlas, criteria, earliest sighting, base map) with serde DTOs."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[features]
+default = []
+# JPL DE440/DE440s ephemeris (from bytes everywhere, from a path off-wasm).
+de440 = ["dep:mooncalc-spk"]
+
+[dependencies]
+mooncalc-core.workspace = true
+mooncalc-visibility.workspace = true
+mooncalc-maps.workspace = true
+mooncalc-atlas.workspace = true
+mooncalc-spk = { workspace = true, optional = true }
+serde.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
