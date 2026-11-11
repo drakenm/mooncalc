@@ -24,6 +24,7 @@ mooncalc-atlas.workspace = true
 mooncalc-spk = { workspace = true, optional = true }
 eframe.workspace = true
 egui.workspace = true
+egui_extras.workspace = true
 serde.workspace = true
 
 [dev-dependencies]

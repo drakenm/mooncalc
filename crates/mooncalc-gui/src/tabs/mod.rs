@@ -100,6 +100,7 @@ impl Tabs {
     /// Run every tab's background bookkeeping.
     pub fn poll(&mut self, ctx: &egui::Context, tc: &mut TabContext<'_>) {
         self.map.poll(ctx, tc);
+        self.ephemeris.poll(ctx, tc);
         // Placeholder tabs have no background work yet; give them a `poll`
         // when they gain jobs.
     }
