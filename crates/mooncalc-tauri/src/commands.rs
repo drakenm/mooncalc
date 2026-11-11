@@ -6,6 +6,9 @@
 //! CPU-heavy work additionally moves to the blocking pool, where map rows are
 //! spread over worker threads ([`crate::parallel`]).
 
+pub mod calendar;
+pub mod tables;
+
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::Instant;
