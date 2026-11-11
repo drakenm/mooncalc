@@ -13,6 +13,7 @@ use mooncalc_core::eclipses::{
 };
 use mooncalc_core::events::{Body, DirectSource, Horizon, Observer};
 use mooncalc_core::{Ephemeris, GeoLocation, Instant};
+use serde::{Deserialize, Serialize};
 
 use super::cached::CachedJob;
 use super::format;
@@ -170,20 +171,67 @@ struct Request {
     eph: EphKey,
 }
 
+/// Which eclipses the view lists (persisted).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum EclipseKinds {
+    #[default]
+    All,
+    Solar,
+    Lunar,
+}
+
+impl EclipseKinds {
+    const ALL: [Self; 3] = [Self::All, Self::Solar, Self::Lunar];
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::All => "All",
+            Self::Solar => "Solar",
+            Self::Lunar => "Lunar",
+        }
+    }
+
+    fn filter(self) -> EclipseFilter {
+        match self {
+            Self::All => EclipseFilter::Any,
+            Self::Solar => EclipseFilter::Solar,
+            Self::Lunar => EclipseFilter::Lunar,
+        }
+    }
+}
+
+/// Persisted choices of the eclipses view.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct EclipseSettings {
+    /// Number of years listed, from the first.
+    pub years: i32,
+    pub kinds: EclipseKinds,
+}
+
+impl Default for EclipseSettings {
+    fn default() -> Self {
+        Self {
+            years: 3,
+            kinds: EclipseKinds::All,
+        }
+    }
+}
+
 /// Transient state of the eclipses view.
 #[derive(Default)]
 pub struct EclipsesView {
     job: CachedJob<Request, Vec<EclipseItem>>,
+    /// First year; `None` follows the app year.
     first: Option<i32>,
-    years: i32,
-    filter: EclipseFilter,
     selected: Option<usize>,
 }
 
 impl EclipsesView {
     fn range(&self, tc: &TabContext<'_>) -> (i32, i32) {
         let first = self.first.unwrap_or(app_year(tc.settings));
-        (first, first + self.years.max(1) - 1)
+        let years = tc.settings.ephemeris_tab.eclipses.years.clamp(1, 100);
+        (first, first + years - 1)
     }
 
     /// The searched years, plus the lunations around them.
@@ -202,16 +250,13 @@ impl EclipsesView {
     }
 
     pub fn poll(&mut self, ctx: &egui::Context, tc: &mut TabContext<'_>, visible: bool) {
-        if self.years == 0 {
-            self.years = 3;
-        }
         if visible && self.coverage(tc).is_none() {
             let (first, last) = self.range(tc);
             let l = &tc.settings.location;
             let req = Request {
                 first,
                 last,
-                filter: self.filter,
+                filter: tc.settings.ephemeris_tab.eclipses.kinds.filter(),
                 location: (l.lat_deg, l.lon_deg, l.elevation_m),
                 eph: EphKey::of(tc.settings),
             };
@@ -251,8 +296,9 @@ impl EclipsesView {
                 self.selected = None;
             }
             ui.label("Years:");
+            let es = &mut tc.settings.ephemeris_tab.eclipses;
             if ui
-                .add(egui::DragValue::new(&mut self.years).range(1..=100))
+                .add(egui::DragValue::new(&mut es.years).range(1..=100))
                 .changed()
             {
                 self.selected = None;
@@ -262,12 +308,9 @@ impl EclipsesView {
                 self.selected = None;
             }
             ui.separator();
-            for (f, label) in [
-                (EclipseFilter::Any, "All"),
-                (EclipseFilter::Solar, "Solar"),
-                (EclipseFilter::Lunar, "Lunar"),
-            ] {
-                if ui.selectable_value(&mut self.filter, f, label).changed() {
+            let es = &mut tc.settings.ephemeris_tab.eclipses;
+            for k in EclipseKinds::ALL {
+                if ui.selectable_value(&mut es.kinds, k, k.label()).changed() {
                     self.selected = None;
                 }
             }

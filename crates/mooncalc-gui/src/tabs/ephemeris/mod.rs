@@ -131,7 +131,10 @@ impl EphemerisView {
 #[serde(default)]
 pub struct EphemerisSettings {
     pub view: EphemerisView,
+    /// Table columns, step, row count, start and angle format.
     pub table: table::TableSettings,
+    /// Eclipse list span and kinds.
+    pub eclipses: eclipses::EclipseSettings,
 }
 
 /// State of the Ephemeris tab.
