@@ -7,6 +7,12 @@
 //! noon, the morning one precedes it. Rise and set use the standard horizon
 //! (upper limb, 34′ refraction, level horizon), as HMNAO and USNO do.
 //!
+//! World maps put the date line on the 180° meridian instead (each place on
+//! its local-mean-time day). Where the civil date differs from that, east of
+//! 180° in UTC+13/+14, the report carries a
+//! [`LocationReport::map_date_note`] naming the map date that shows its
+//! evening ([`crate::dateline::report_note`]).
+//!
 //! Each criterion is evaluated at its own evaluation time (Yallop's best
 //! time, sunset, or a solar altitude), so the geometry behind each verdict is
 //! that criterion's. The report's headline geometry is at Yallop's best time.
@@ -238,6 +244,7 @@ pub fn location_report(
         illumination_at_noon: illum.fraction,
         evening,
         morning,
+        map_date_note: crate::dateline::report_note(date, p.location.lon_deg, p.tz_offset_hours),
     })
 }
 

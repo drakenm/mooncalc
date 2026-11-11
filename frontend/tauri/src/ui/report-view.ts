@@ -107,6 +107,7 @@ export class ReportView {
         `${s.locationName ?? 'Custom location'} · ${formatLat(r.location.latDeg, 4)} ${formatLon(r.location.lonDeg, 4)} · ` +
           `${r.location.elevationM.toFixed(0)} m · local date ${formatDate(r.date)} (${formatOffset(tz)})`,
       ),
+      r.mapDateNote ? h('p', { class: 'note map-date-note', role: 'note' }, r.mapDateNote.text) : null,
       h(
         'div',
         { class: 'report-grid' },

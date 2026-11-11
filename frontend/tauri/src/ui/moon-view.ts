@@ -20,6 +20,7 @@ import { BackendError, type Backend, type DiscView, type MoonFeatures, type Moon
 import { changed, type Store } from '../state';
 import { debounce, h, replaceChildren } from './dom';
 import { DEG, Stage, cssVar, dateHm, label, msToUt, norm360, utMs, zoneLabel } from './sky-common';
+import { ViewPrefs } from './view-prefs';
 
 type Row = [string, string | Node];
 
@@ -160,6 +161,10 @@ function rasterize(disc: Disc, n: number, mask: MareMask | null): ImageData {
 
 const CRATER_KEY = 'mooncalc.moon.crater';
 
+/** Display options remembered between sessions (the crater has its own key). */
+type MoonPrefs = { zenithUp: boolean; showMaria: boolean; showCraters: boolean; showLabels: boolean };
+const PREFS = new ViewPrefs<MoonPrefs>('mooncalc.view.moon.v1', { zenithUp: false, showMaria: true, showCraters: true, showLabels: true });
+
 export class MoonTabView {
   readonly el = h('div', { class: 'sky-view moon-view' });
   private readonly discEl = h('div', { class: 'sky-stage moon-disc' });
@@ -193,6 +198,11 @@ export class MoonTabView {
     } catch {
       // Not remembered.
     }
+    const prefs = PREFS.load();
+    this.zenithUp = prefs.zenithUp;
+    this.showMaria = prefs.showMaria;
+    this.showCraters = prefs.showCraters;
+    this.showLabels = prefs.showLabels;
     this.disc = new Stage(this.discEl, (ctx, w, hh) => this.drawDisc(ctx, w, hh));
     this.graph = new Stage(this.graphEl, (ctx, w, hh) => this.drawGraph(ctx, w, hh));
     const orient = (zen: boolean, text: string) =>
@@ -201,6 +211,7 @@ export class MoonTabView {
     const check = (text: string, value: boolean, set: (v: boolean) => void) =>
       h('label', { class: 'inline' }, h('input', { type: 'checkbox', checked: value, onchange: (e: Event) => {
         set((e.target as HTMLInputElement).checked);
+        this.savePrefs();
         this.disc.redraw();
       } }), text);
     const step = (text: string, hours: number) =>
@@ -254,7 +265,12 @@ export class MoonTabView {
   private setOrientation(zen: boolean): void {
     this.zenithUp = zen;
     this.orientButtons.forEach((b, i) => b.setAttribute('aria-pressed', String((i === 1) === zen)));
+    this.savePrefs();
     this.disc.redraw();
+  }
+
+  private savePrefs(): void {
+    PREFS.save({ zenithUp: this.zenithUp, showMaria: this.showMaria, showCraters: this.showCraters, showLabels: this.showLabels });
   }
 
   private async refresh(force = false): Promise<void> {

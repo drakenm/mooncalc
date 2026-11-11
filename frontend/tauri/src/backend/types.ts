@@ -175,6 +175,8 @@ export interface MapResult {
   /** The geocentric new Moon nearest the date. */
   conjunction: UtDateTime;
   evaluationTime: string;
+  /** "Each location is shown on its own local evening of <date>; the date line is the 180° meridian (HMNAO convention)." */
+  dateConvention: string;
   best: BestCell | null;
   ephemeris: string;
   timing: MapTiming;
@@ -293,6 +295,16 @@ export interface LocationReport {
   illuminationAtNoon: number;
   evening: CrescentReport;
   morning: CrescentReport;
+  /** Set when the world map for `date` shows another evening at this longitude. */
+  mapDateNote: MapDateNote | null;
+}
+
+/** Which world-map date shows a report's evening (mooncalc_app::dto::MapDateNote). */
+export interface MapDateNote {
+  mapDate: CivilDate;
+  /** mapDate − date, days: −1 east of 180° in UTC+13/+14. */
+  dayShift: number;
+  text: string;
 }
 
 // --- atlas ----------------------------------------------------------------

@@ -38,6 +38,7 @@ Set out in the `mooncalc-core` crate docs and binding on every crate:
 - `Instant` carries UT as a Julian Day. Ephemerides take TT Julian Days.
 - Distances are in km.
 - Ephemerides return **geocentric apparent** positions of date. Topocentric correction is done by the caller.
+- **Dates of maps and reports.** A world map of a date shows each place on its own local evening (or morning) of that date, anchored at 12h local mean time, so its date line is the 180° meridian, as on HMNAO's maps (`mooncalc_maps::engine`). The location report follows the observer's civil date (civil noon in their time zone). The two agree wherever the zone offset is within 12 hours of mean solar time. East of 180° in UTC+13/+14 (Samoa, Tonga, the Line Islands) the civil date runs a day ahead, so the map for 10 March shows their civil 11 March. `CalendarDate::mean_time_date` gives the map date for a civil date. The report then carries a `mapDateNote`, and both frontends state the map's convention and note when the evening under the observer marker is not their civil one (`mooncalc_app::dateline`).
 
 ## Ephemeris backends
 

@@ -12,6 +12,7 @@
 //! | [`criteria`] | [`criteria::list`]: criteria with legends and references |
 //! | [`map`] | [`map::MapJob`]: prepare → evaluate row blocks → assemble → [`dto::MapResult`]; PNG export |
 //! | [`report`] | [`report::location_report`]: day events, evening and morning crescents under every criterion |
+//! | [`dateline`] | map date convention and the notes where an observer's civil date differs from it |
 //! | [`atlas`] | [`atlas::search_cities`], [`atlas::nearest_city`] |
 //! | [`earliest`] | [`earliest::EarliestJob`]: earliest-sighting scan after a conjunction |
 //! | [`basemap`] | [`basemap::basemap`]: simplified coastlines and borders |
@@ -34,6 +35,7 @@ pub mod basemap;
 pub mod calendar;
 pub mod codec;
 pub mod criteria;
+pub mod dateline;
 pub mod dto;
 pub mod earliest;
 pub mod ephemeris;
@@ -117,6 +119,7 @@ mod wire_tests {
             "statusCounts",
             "conjunction",
             "evaluationTime",
+            "dateConvention",
             "best",
             "ephemeris",
             "timing",

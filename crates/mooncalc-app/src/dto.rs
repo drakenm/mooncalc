@@ -478,6 +478,10 @@ pub struct MapResult {
     /// The rule for each cell's evaluation instant, e.g. "Best time
     /// (sunset + 4/9 lag)".
     pub evaluation_time: String,
+    /// The date convention, e.g. "Each location is shown on its own local
+    /// evening of 2024-03-10; the date line is the 180° meridian (HMNAO
+    /// convention)."
+    pub date_convention: String,
     /// The best cell on the map, if any cell has a crescent.
     pub best: Option<BestCell>,
     /// The ephemeris used.
@@ -679,6 +683,24 @@ pub struct LocationReport {
     pub illumination_at_noon: f64,
     pub evening: CrescentReport,
     pub morning: CrescentReport,
+    /// Present when the world map for `date` shows another evening at this
+    /// longitude (the map's date line is the 180° meridian, the report
+    /// follows the civil date): which map date shows the report's evening.
+    pub map_date_note: Option<MapDateNote>,
+}
+
+/// Which world-map date shows a report's evening and morning, when it is not
+/// the report's civil date. See `crate::dateline`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MapDateNote {
+    /// The map date whose evening at the observer's longitude is the report's.
+    pub map_date: CivilDate,
+    /// `map_date − date` in days: −1 where the civil date runs ahead of the
+    /// 180° date line (UTC+13/+14 east of 180°), +1 where it runs behind.
+    pub day_shift: i32,
+    /// A sentence for display.
+    pub text: String,
 }
 
 // ---------------------------------------------------------------------------

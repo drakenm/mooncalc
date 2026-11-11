@@ -16,8 +16,48 @@ export function formatDate(d: CivilDate): string {
   return `${d.year < 0 ? '-' : ''}${pad(Math.abs(d.year), 4)}-${pad(d.month)}-${pad(d.day)}`;
 }
 
+/** Hour and minute as given (no rounding; see `roundToMinute`). */
 export function formatTime(t: Pick<UtDateTime, 'hour' | 'minute'>): string {
   return `${pad(t.hour)}:${pad(t.minute)}`;
+}
+
+/** Julian calendar before 1582-10-15, Gregorian from then, as the Rust side. */
+function isJulian(year: number, month: number, day: number): boolean {
+  return year < 1582 || (year === 1582 && (month < 10 || (month === 10 && day < 15)));
+}
+
+function daysInMonth(year: number, month: number, julian: boolean): number {
+  if (month !== 2) return [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1]!;
+  const mod = (n: number, k: number) => ((n % k) + k) % k;
+  const leap = julian ? mod(year, 4) === 0 : (mod(year, 4) === 0 && mod(year, 100) !== 0) || mod(year, 400) === 0;
+  return leap ? 29 : 28;
+}
+
+/**
+ * A date-time rounded to the nearest minute (seconds 0), carrying into the
+ * hour, day, month and year, as egui and the HMNAO/USNO tables do. Dates
+ * follow the Rust convention (Julian before 1582-10-15, astronomical years).
+ */
+export function roundToMinute(t: UtDateTime): UtDateTime {
+  let { year, month, day, hour, minute } = t;
+  if (t.second >= 30) minute++;
+  if (minute >= 60) {
+    minute -= 60;
+    hour++;
+  }
+  if (hour >= 24) {
+    hour -= 24;
+    const julian = isJulian(year, month, day);
+    if (year === 1582 && month === 10 && day === 4) day = 15;
+    else if (++day > daysInMonth(year, month, julian)) {
+      day = 1;
+      if (++month > 12) {
+        month = 1;
+        year++;
+      }
+    }
+  }
+  return { year, month, day, hour, minute, second: 0 };
 }
 
 /** "UT+3", "UT−5:30", "UT". */
@@ -51,11 +91,13 @@ export function shiftHours(t: UtDateTime, hours: number): UtDateTime {
   };
 }
 
+/** "2024-03-10 18:42 UT (21:42 UT+3)", rounded to the nearest minute. */
 export function formatUtDateTime(t: UtDateTime | null, tzOffsetHours?: number): string {
   if (!t) return '—';
-  const ut = `${formatDate(t)} ${formatTime(t)} UT`;
+  const r = roundToMinute(t);
+  const ut = `${formatDate(r)} ${formatTime(r)} UT`;
   if (tzOffsetHours === undefined || tzOffsetHours === 0) return ut;
-  const local = shiftHours(t, tzOffsetHours);
+  const local = shiftHours(r, tzOffsetHours);
   return `${ut} (${formatTime(local)} ${formatOffset(tzOffsetHours)})`;
 }
 
