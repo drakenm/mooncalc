@@ -8,6 +8,9 @@ import { h } from './dom';
 import { MapView } from './map-view';
 import { createPlaceholder, PLACEHOLDERS } from './placeholders';
 import { ReportView } from './report-view';
+import { MoonTabView } from './moon-view';
+import { SkyView } from './sky-view';
+import { TrajectoryView } from './trajectory-view';
 import { createSidebar } from './sidebar';
 
 type TabId = 'map' | 'report' | 'earliest' | 'ephemeris' | 'calendar' | 'sky' | 'moon' | 'trajectory' | 'about';
@@ -20,6 +23,8 @@ interface Tab {
 }
 
 const TAB_KEY = 'mooncalc.tab';
+
+const skyTab = (v: { el: HTMLElement; setActive(a: boolean): void }) => ({ panel: v.el, setActive: (a: boolean) => v.setActive(a) });
 
 export interface AppContext {
   backend: Backend;
@@ -67,9 +72,9 @@ export function createApp(ctx: AppContext): HTMLElement {
     },
     { id: 'ephemeris', label: 'Ephemeris', panel: createPlaceholder(PLACEHOLDERS.ephemeris) },
     { id: 'calendar', label: 'Calendar', panel: createPlaceholder(PLACEHOLDERS.calendar) },
-    { id: 'sky', label: 'Sky', panel: createPlaceholder(PLACEHOLDERS.sky) },
-    { id: 'moon', label: 'Moon', panel: createPlaceholder(PLACEHOLDERS.moon) },
-    { id: 'trajectory', label: 'Trajectory', panel: createPlaceholder(PLACEHOLDERS.trajectory) },
+    { id: 'sky', label: 'Sky', ...skyTab(new SkyView(ctx.backend, ctx.store)) },
+    { id: 'moon', label: 'Moon', ...skyTab(new MoonTabView(ctx.backend, ctx.store)) },
+    { id: 'trajectory', label: 'Trajectory', ...skyTab(new TrajectoryView(ctx.backend, ctx.store)) },
     { id: 'about', label: 'About', panel: createAbout(ctx.info) },
   ];
 

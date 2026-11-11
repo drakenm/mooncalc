@@ -5,6 +5,7 @@
 import { invoke } from '@tauri-apps/api/core';
 
 import { BackendError, type Backend } from './backend';
+import { tauriSkyApi } from './tauri-sky';
 import type {
   AppInfo,
   Basemap,
@@ -81,4 +82,6 @@ export class TauriBackend implements Backend {
   loadDe440(params: LoadDe440Params): Promise<EphemerisBackendInfo> {
     return call('load_de440', { params });
   }
+
+  readonly sky = tauriSkyApi(call);
 }

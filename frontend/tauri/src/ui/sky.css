@@ -1,0 +1,198 @@
+/* Sky, Trajectory and Moon tabs. */
+
+.sky-view {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.sky-stage {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  margin: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: #0b1020;
+}
+
+.sky-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+}
+
+.sky-view .toolbar {
+  flex-wrap: wrap;
+}
+
+.sky-summary {
+  padding: 0 12px 8px;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.sky-summary .hint {
+  margin: 2px 0 0;
+}
+
+.sky-timebar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px 4px;
+}
+
+.sky-slider {
+  flex: 1;
+  accent-color: var(--accent);
+}
+
+.sky-time {
+  min-width: 8.5em;
+  font-family: var(--mono);
+  font-size: 12px;
+  text-align: right;
+}
+
+.sky-play {
+  min-width: 2.6em;
+}
+
+.sky-readout {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 18px;
+  padding: 4px 12px 12px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+}
+
+.sky-readout strong {
+  color: var(--text);
+}
+
+.sky-hover {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  padding: 3px 8px;
+  border-radius: var(--radius);
+  background: rgb(0 0 0 / 0.55);
+  color: #e8ecf5;
+  font-family: var(--mono);
+  font-size: 11px;
+  pointer-events: none;
+}
+
+/* Trajectory */
+
+.traj-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 380px);
+  gap: 12px;
+  flex: 1;
+  min-height: 0;
+  padding-right: 12px;
+}
+
+.traj-plot {
+  min-height: 260px;
+  background: var(--surface);
+  margin-right: 0;
+}
+
+.traj-side {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.traj-compass {
+  flex: none;
+  height: 260px;
+  margin: 0;
+  background: var(--surface);
+}
+
+.traj-readouts .kv {
+  font-size: 12px;
+}
+
+/* Moon */
+
+.moon-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 420px);
+  gap: 12px;
+  flex: 1;
+  min-height: 0;
+  padding: 0 12px 12px 0;
+}
+
+.moon-disc {
+  margin-right: 0;
+  background: #05070d;
+}
+
+.moon-side {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.moon-side h3 {
+  margin: 8px 0 0;
+  font-size: 13px;
+}
+
+.moon-data .kv {
+  font-size: 12px;
+}
+
+.moon-data .hint {
+  margin: 4px 0;
+}
+
+.moon-crater {
+  margin: 6px 0 2px;
+}
+
+.moon-graph {
+  flex: none;
+  height: 300px;
+  margin: 0;
+  background: var(--surface);
+}
+
+@media (max-width: 1100px) {
+  .traj-grid,
+  .moon-grid {
+    grid-template-columns: 1fr;
+    overflow-y: auto;
+  }
+
+  .moon-disc {
+    min-height: 420px;
+  }
+}
+
+.traj-readouts .kv th,
+.moon-data .kv th {
+  width: 9.5em;
+}
+
+.traj-readouts .kv th,
+.traj-readouts .kv td,
+.moon-data .kv th,
+.moon-data .kv td {
+  padding: 4px 6px;
+}

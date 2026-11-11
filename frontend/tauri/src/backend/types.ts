@@ -386,3 +386,5 @@ export interface Basemap {
   borders: PolylineSet;
   attribution: string;
 }
+
+export * from './types-sky';
