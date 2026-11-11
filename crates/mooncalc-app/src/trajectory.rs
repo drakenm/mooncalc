@@ -83,7 +83,7 @@ pub struct BodyDayEvents {
 /// When a twilight begins in the morning and ends in the evening.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct TwilightTimes {
+pub struct TrajectoryTwilight {
     pub dawn: Option<UtDateTime>,
     pub dusk: Option<UtDateTime>,
 }
@@ -113,9 +113,9 @@ pub struct TrajectoryDay {
     pub sun: BodyDayEvents,
     pub moon: BodyDayEvents,
     /// Sun 6°, 12° and 18° below the horizon.
-    pub civil: TwilightTimes,
-    pub nautical: TwilightTimes,
-    pub astronomical: TwilightTimes,
+    pub civil: TrajectoryTwilight,
+    pub nautical: TrajectoryTwilight,
+    pub astronomical: TrajectoryTwilight,
     /// Principal phases from about a month before the day to two months
     /// after, in time order: the age is counted from the last `new` before
     /// an instant.
@@ -188,7 +188,7 @@ pub fn trajectory_day(
             moon_semi_diameter_arcmin: moon_semidiameter(s.moon.topo.distance_km) / DEG * 60.0,
         })
         .collect();
-    let tw = |i: usize| TwilightTimes {
+    let tw = |i: usize| TrajectoryTwilight {
         dawn: day.twilights[i].0.map(ut),
         dusk: day.twilights[i].1.map(ut),
     };
