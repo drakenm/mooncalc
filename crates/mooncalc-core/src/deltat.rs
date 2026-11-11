@@ -11,10 +11,15 @@
 //!   *Five Millennium Canon of Solar Eclipses: −1999 to +3000*
 //!   (NASA/TP-2006-214141, 2006), also published on the NASA eclipse web
 //!   site ("Polynomial expressions for Delta T").
-//! * After the last observed value the Espenak–Meeus polynomial is used with
-//!   the offset at the end of the table fading linearly to zero over
-//!   [`FADE_YEARS`] years, so ΔT is continuous and returns to the canonical
-//!   long-term extrapolation.
+//! * After the last observed value, a cubic Hermite blend runs over
+//!   [`FADE_YEARS`] years. It starts from the last observed value and its
+//!   recent trend (the mean rate over the last [`TREND_YEARS`] years) and
+//!   ends on the Espenak–Meeus value and slope. ΔT and its rate are both
+//!   continuous: the near future continues the observed trend and then
+//!   rejoins the canonical long-term extrapolation. A linear fade of the
+//!   offset would jump at once to the polynomial's rate, about 0.75 s/yr in
+//!   2027 against an observed trend near zero, and would give a ΔT about
+//!   2.5 s too high by 2030.
 //!
 //! Inside the table, values are linearly interpolated; the table is smooth
 //! enough that this adds < 0.1 s. The Espenak–Meeus expressions assume a
@@ -23,9 +28,14 @@
 
 use crate::time::{J2000, julian_day};
 
-/// Years over which the offset between the last observed value and the
-/// polynomial extrapolation is faded out.
+/// Years over which the extrapolation blends from the observed trend into
+/// the Espenak–Meeus polynomial.
 pub const FADE_YEARS: f64 = 75.0;
+
+/// Baseline (years) for the observed rate at the start of the
+/// extrapolation. Several years average out the annual and semi-annual
+/// variations of UT1 (a few hundredths of a second).
+pub const TREND_YEARS: f64 = 3.0;
 
 const TABLE_10A_START: f64 = 1620.0;
 /// Start of the linear bridge from the polynomials to Table 10.A.
@@ -114,12 +124,32 @@ pub fn delta_t_for_year(y: f64) -> f64 {
         }
     }
     if y > LAST_OBSERVED_YEAR {
-        let (y0, dt0) = IERS[IERS.len() - 1];
-        let offset = dt0 - espenak_meeus(y0);
-        let w = (1.0 - (y - y0) / FADE_YEARS).max(0.0);
-        return espenak_meeus(y) + offset * w;
+        return extrapolate(y);
     }
     espenak_meeus(y)
+}
+
+/// ΔT after the last observed value: a cubic Hermite curve from the last
+/// value and the recent observed rate to the Espenak–Meeus value and rate
+/// [`FADE_YEARS`] later, then the polynomial itself.
+fn extrapolate(y: f64) -> f64 {
+    let y1 = LAST_OBSERVED_YEAR + FADE_YEARS;
+    if y >= y1 {
+        return espenak_meeus(y);
+    }
+    let (y0, p0) = IERS[IERS.len() - 1];
+    let m0 = (p0 - delta_t_for_year(y0 - TREND_YEARS)) / TREND_YEARS;
+    let p1 = espenak_meeus(y1);
+    // The polynomial piece at y1 (2050–2150) is smooth; a central
+    // difference is exact for its quadratic form to rounding.
+    let m1 = (espenak_meeus(y1 + 0.5) - espenak_meeus(y1 - 0.5)) / 1.0;
+    let h = FADE_YEARS;
+    let t = (y - y0) / h;
+    let (t2, t3) = (t * t, t * t * t);
+    (2.0 * t3 - 3.0 * t2 + 1.0) * p0
+        + (t3 - 2.0 * t2 + t) * h * m0
+        + (-2.0 * t3 + 3.0 * t2) * p1
+        + (t3 - t2) * h * m1
 }
 
 /// The Espenak & Meeus (2006) polynomial expressions for ΔT (seconds) at a
@@ -288,9 +318,36 @@ mod tests {
     }
 
     #[test]
+    fn extrapolation_continues_the_observed_rate() {
+        // The rate is continuous where observation ends: the slope just
+        // after LAST_OBSERVED_YEAR equals the TREND_YEARS mean rate.
+        let y0 = LAST_OBSERVED_YEAR;
+        let trend = (delta_t_for_year(y0) - delta_t_for_year(y0 - TREND_YEARS)) / TREND_YEARS;
+        let h = 1e-3;
+        let after = (delta_t_for_year(y0 + h) - delta_t_for_year(y0)) / h;
+        assert!((after - trend).abs() < 0.01, "after {after} trend {trend}");
+        // ... and where the blend meets the polynomial.
+        let y1 = y0 + FADE_YEARS;
+        let before = (delta_t_for_year(y1) - delta_t_for_year(y1 - h)) / h;
+        let poly = (espenak_meeus(y1 + h) - espenak_meeus(y1)) / h;
+        assert!((before - poly).abs() < 0.01, "before {before} poly {poly}");
+        assert!((delta_t_for_year(y1 - 1e-9) - espenak_meeus(y1)).abs() < 1e-6);
+        // Monotonic over the blend (no overshoot or dip).
+        let mut prev = delta_t_for_year(y0);
+        for i in 1..=750 {
+            let dt = delta_t_for_year(y0 + i as f64 * 0.1);
+            assert!(dt >= prev - 1e-9, "{}: {dt} < {prev}", y0 + i as f64 * 0.1);
+            prev = dt;
+        }
+    }
+
+    #[test]
     fn near_future_extrapolation_is_sane() {
-        // 2030: ΔT will be close to 69–72 s, not the 75+ s of the raw polynomial.
+        // 2030: ΔT will be close to 69–71 s, not the 75+ s of the raw
+        // polynomial. JPL Horizons (EOP file eop.261110.p270205) implies
+        // ≈ 69.4 s for 2030 September 1 (see the horizons_topocentric
+        // integration test).
         let dt = delta_t_for_year(2030.0);
-        assert!(dt > 68.0 && dt < 73.0, "{dt}");
+        assert!(dt > 68.5 && dt < 71.0, "{dt}");
     }
 }
