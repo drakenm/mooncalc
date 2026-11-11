@@ -2,27 +2,27 @@
 //! set (with azimuths and the transit altitude), plus civil, nautical and
 //! astronomical twilight, for the app location in the app time zone.
 //!
-//! Events come from `mooncalc_core::events` (`day_events`, `twilight`):
-//! upper limb on the horizon with 34′ refraction, Sun's centre at −6°,
-//! −12°, −18° for twilight. Positions are interpolated from an
-//! `ApparentTable` built once per month.
+//! The month comes from the shared service
+//! `mooncalc_app::tables::rise_set_month` (`mooncalc_core::events`: upper
+//! limb on the horizon with 34′ refraction, Sun's centre at −6°, −12°,
+//! −18° for twilight), converted to [`DayRow`]s for display.
 
-use mooncalc_core::events::{
-    ApparentTable, Body, CalendarDate, Circumpolar, Horizon, Observer, PositionSource, Twilight,
-    day_events, twilight,
-};
-use mooncalc_core::refraction::{Atmosphere, apparent_altitude};
-use mooncalc_core::{GeoLocation, Instant};
+use mooncalc_app::dto::{ApiError, Location, UtDateTime};
+use mooncalc_app::tables::{AngledEventDto, BodyDayDto, RiseSetParams, TwilightDto};
+use mooncalc_core::angle::DEG;
+use mooncalc_core::events::{CalendarDate, Circumpolar};
+use mooncalc_core::{Ephemeris, GeoLocation, Instant};
 
 use super::cached::CachedJob;
+use super::coverage;
 #[cfg(test)]
 use super::format;
-use super::{DAY_MARGIN, coverage};
 use super::{EphKey, busy, ephemeris, error_line, set_app_time, time_cell};
 use crate::datetime::{DateTimeFields, days_in_month};
 use crate::jobs::JobError;
 use crate::tabs::TabContext;
 use crate::widgets::coverage::coverage_notice;
+use mooncalc_app::tables::RISE_SET_COVERAGE_MARGIN_DAYS;
 
 const MONTHS: [&str; 12] = [
     "January",
@@ -72,52 +72,62 @@ struct Request {
     eph: EphKey,
 }
 
-/// Compute the rows of one month.
-pub fn month_rows<S: PositionSource + ?Sized>(
-    src: &S,
+fn instant(t: &UtDateTime) -> Instant {
+    t.to_instant()
+}
+
+fn body_day(d: &BodyDayDto) -> BodyDay {
+    let event =
+        |e: &Option<AngledEventDto>| e.as_ref().map(|e| (instant(&e.time), e.angle_deg * DEG));
+    BodyDay {
+        rise: event(&d.rise),
+        transit: event(&d.transit),
+        set: event(&d.set),
+        circumpolar: match d.circumpolar.as_deref() {
+            Some("always-up") => Some(Circumpolar::AlwaysUp),
+            Some("always-down") => Some(Circumpolar::AlwaysDown),
+            _ => None,
+        },
+    }
+}
+
+fn twilight(t: &TwilightDto) -> (Option<Instant>, Option<Instant>) {
+    (t.dawn.as_ref().map(instant), t.dusk.as_ref().map(instant))
+}
+
+/// The rows of one month (`mooncalc_app::tables::rise_set_month`).
+pub fn month_rows(
+    eph: &dyn Ephemeris,
     loc: &GeoLocation,
     year: i32,
     month: u32,
     tz: f64,
-    mut cancelled: impl FnMut() -> bool,
-) -> Option<Vec<DayRow>> {
-    let obs = Observer::new(loc);
-    let atm = Atmosphere::STANDARD;
-    let angle = |body: Body, t: Instant, azimuth: bool| -> f64 {
-        let f = obs.frame_at(src, t.jd_ut);
-        let v = f.topocentric(&src.position(body, t.jd_ut));
-        if azimuth {
-            f.azimuth(&v)
-        } else {
-            apparent_altitude(f.altitude(&v), &atm)
-        }
-    };
-    let body_day = |body: Body, t0: Instant, t1: Instant| -> BodyDay {
-        let d = day_events(src, body, loc, Horizon::STANDARD, t0, t1);
-        BodyDay {
-            rise: d.rise.map(|t| (t, angle(body, t, true))),
-            transit: d.upper_transit.map(|t| (t, angle(body, t, false))),
-            set: d.set.map(|t| (t, angle(body, t, true))),
-            circumpolar: d.circumpolar,
-        }
-    };
-    let mut rows = Vec::new();
-    for day in 1..=days_in_month(year, month) {
-        if cancelled() {
-            return None;
-        }
-        let date = CalendarDate::new(year, month, day);
-        let (t0, t1) = date.local_day(tz);
-        rows.push(DayRow {
-            date,
-            sun: body_day(Body::Sun, t0, t1),
-            moon: body_day(Body::Moon, t0, t1),
-            civil: twilight(src, loc, Twilight::Civil, t0, t1),
-            nautical: twilight(src, loc, Twilight::Nautical, t0, t1),
-            astronomical: twilight(src, loc, Twilight::Astronomical, t0, t1),
-        });
-    }
-    Some(rows)
+) -> Result<Vec<DayRow>, ApiError> {
+    let m = mooncalc_app::tables::rise_set_month(
+        eph,
+        &RiseSetParams {
+            year,
+            month,
+            tz_offset_hours: tz,
+            location: Location {
+                lat_deg: loc.lat_deg,
+                lon_deg: loc.lon_deg,
+                elevation_m: loc.elevation_m,
+            },
+            ephemeris_id: None,
+        },
+    )?;
+    Ok(m.days
+        .iter()
+        .map(|d| DayRow {
+            date: d.date.into(),
+            sun: body_day(&d.sun),
+            moon: body_day(&d.moon),
+            civil: twilight(&d.civil),
+            nautical: twilight(&d.nautical),
+            astronomical: twilight(&d.astronomical),
+        })
+        .collect())
 }
 
 /// Transient state of the rise/set view.
@@ -146,8 +156,8 @@ impl RiseSetView {
             tc.settings,
             start.jd_ut,
             start.jd_ut + days,
-            DAY_MARGIN,
-            DAY_MARGIN,
+            RISE_SET_COVERAGE_MARGIN_DAYS,
+            RISE_SET_COVERAGE_MARGIN_DAYS,
         )
     }
 
@@ -166,20 +176,9 @@ impl RiseSetView {
             self.job
                 .request(ctx, req, "Computing rise/set table", move |req, job| {
                     let loc = GeoLocation::new(req.location.0, req.location.1, req.location.2);
-                    let (start, _) = CalendarDate::new(req.year, req.month, 1).local_day(req.tz);
-                    let days = days_in_month(req.year, req.month) as f64;
-                    let table = ApparentTable::with_default_step(
-                        eph.as_ref(),
-                        start.add_days(-1.0),
-                        start.add_days(days + 1.0),
-                    );
-                    let mut n = 0.0;
-                    month_rows(&table, &loc, req.year, req.month, req.tz, || {
-                        n += 1.0;
-                        job.set_progress((n / days) as f32);
-                        job.is_cancelled()
-                    })
-                    .ok_or(JobError::Cancelled)
+                    job.checkpoint()?;
+                    month_rows(eph.as_ref(), &loc, req.year, req.month, req.tz)
+                        .map_err(|e| JobError::Failed(e.message))
                 });
         }
         self.job.poll(tc.status);
@@ -319,14 +318,12 @@ fn body_cells(ui: &mut egui::Ui, d: &BodyDay, tz: f64, clicked: &mut Option<Inst
 mod tests {
     use super::*;
     use mooncalc_core::MeeusEphemeris;
-    use mooncalc_core::events::DirectSource;
 
     #[test]
     fn makkah_march_2024() {
         let eph = MeeusEphemeris::new();
-        let src = DirectSource::new(&eph);
         let loc = GeoLocation::new(21.4225, 39.8262, 0.0);
-        let rows = month_rows(&src, &loc, 2024, 3, 3.0, || false).unwrap();
+        let rows = month_rows(&eph, &loc, 2024, 3, 3.0).unwrap();
         assert_eq!(rows.len(), 31);
         let r = &rows[10]; // 2024-03-11
         assert_eq!(r.date, CalendarDate::new(2024, 3, 11));

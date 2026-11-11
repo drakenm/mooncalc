@@ -59,6 +59,14 @@ pub const MAX_TABLE_ROWS: u32 = 10_000;
 pub const DEFAULT_TABLE_CHUNK: usize = 250;
 /// Most years one eclipse request may span.
 pub const MAX_ECLIPSE_YEARS: i32 = 200;
+/// Ephemeris coverage the yearly lists (phases, apsides and nodes,
+/// seasons) need either side of the local year, days: searches bracket
+/// events up to a lunation beyond it.
+pub const YEAR_COVERAGE_MARGIN_DAYS: f64 = 40.0;
+/// Coverage a rise/set month needs either side of it, days.
+pub const RISE_SET_COVERAGE_MARGIN_DAYS: f64 = 2.0;
+/// Coverage an eclipse list needs either side of its years, days.
+pub const ECLIPSE_COVERAGE_MARGIN_DAYS: f64 = 2.0;
 
 /// Minutes of time per radian of hour angle.
 const MIN_PER_RAD: f64 = 720.0 / std::f64::consts::PI;
@@ -106,7 +114,11 @@ fn check_year(eph: &dyn Ephemeris, p: &YearParams) -> Result<(Instant, Instant),
     }
     validate::tz_offset(p.tz_offset_hours)?;
     let (t0, t1) = year_bounds(p.year, p.tz_offset_hours);
-    check_covers(eph, t0.jd_tt() - 40.0, t1.jd_tt() + 40.0)?;
+    check_covers(
+        eph,
+        t0.jd_tt() - YEAR_COVERAGE_MARGIN_DAYS,
+        t1.jd_tt() + YEAR_COVERAGE_MARGIN_DAYS,
+    )?;
     Ok((t0, t1))
 }
 
@@ -287,7 +299,11 @@ pub fn rise_set_month(eph: &dyn Ephemeris, p: &RiseSetParams) -> Result<RiseSetM
         .collect();
     let (start, _) = first.local_day(p.tz_offset_hours);
     let end = start.add_days(dates.len() as f64);
-    check_covers(eph, start.jd_tt() - 2.0, end.jd_tt() + 2.0)?;
+    check_covers(
+        eph,
+        start.jd_tt() - RISE_SET_COVERAGE_MARGIN_DAYS,
+        end.jd_tt() + RISE_SET_COVERAGE_MARGIN_DAYS,
+    )?;
     let table = ApparentTable::with_default_step(eph, start.add_days(-1.0), end.add_days(1.0));
     let loc = GeoLocation::from(p.location);
     let obs = Observer::new(&loc);
@@ -478,7 +494,11 @@ pub fn eclipse_candidates(
     }
     let (t0, _) = year_bounds(p.first_year, 0.0);
     let (_, t1) = year_bounds(p.last_year, 0.0);
-    check_covers(eph, t0.jd_tt() - 2.0, t1.jd_tt() + 2.0)?;
+    check_covers(
+        eph,
+        t0.jd_tt() - ECLIPSE_COVERAGE_MARGIN_DAYS,
+        t1.jd_tt() + ECLIPSE_COVERAGE_MARGIN_DAYS,
+    )?;
     let filter = match p.filter {
         EclipseKindFilter::Any => EclipseFilter::Any,
         EclipseKindFilter::Solar => EclipseFilter::Solar,
