@@ -14,6 +14,7 @@ import { BasemapLayer } from './basemap-layer';
 import { debounce, h, replaceChildren } from './dom';
 import { downloadBase64, formatDate, formatLat, formatLon, formatUtDateTime, formatValue, valueSymbol } from './format';
 import { decodeMap, rasterZones, valueAt, zoneAt, type ZoneData } from './map-image';
+import { ViewPrefs } from './view-prefs';
 
 const MAX_ZOOM = 48;
 const CLICK_SLOP_PX = 4;
@@ -23,6 +24,14 @@ const RESOLUTIONS = [
   { deg: 0.5, label: '0.5° (720 × 360)' },
   { deg: 0.25, label: '0.25° (1440 × 720)' },
 ];
+/** The view remembered between sessions: centre and zoom (× the fit scale). */
+type MapPrefs = { lon: number; lat: number; zoom: number };
+const PREFS = new ViewPrefs<MapPrefs>(
+  'mooncalc.view.map.v1',
+  { lon: 0, lat: 0, zoom: 1 },
+  { lon: (v) => Math.abs(v) <= 180, lat: (v) => Math.abs(v) <= 90, zoom: (v) => v >= 1 && v <= MAX_ZOOM },
+);
+
 /** Graticule spacings to choose from, degrees. */
 const GRID_STEPS = [30, 15, 10, 5, 2, 1, 0.5, 0.25];
 
@@ -92,6 +101,10 @@ export class MapView {
   private drag: { x: number; y: number; lon: number; lat: number; moved: boolean; id: number } | null = null;
   private frame = 0;
   private readonly scheduleRaster = debounce(() => this.renderZones(), 90);
+  private readonly persist = debounce(() => {
+    const c = this.camera;
+    PREFS.save({ lon: c.lon, lat: c.lat, zoom: c.scale / this.fitScale() });
+  }, 400);
 
   constructor(
     private readonly backend: Backend,
@@ -355,12 +368,17 @@ export class MapView {
   private resize(): void {
     const rect = this.canvas.getBoundingClientRect();
     if (rect.width === 0 || rect.height === 0) return;
-    const wasFit = this.size.w === 0 || Math.abs(this.camera.scale - this.fitScale()) < 1e-9;
+    const first = this.size.w === 0;
+    const wasFit = first || Math.abs(this.camera.scale - this.fitScale()) < 1e-9;
     this.size = { w: rect.width, h: rect.height };
     const dpr = window.devicePixelRatio || 1;
     this.canvas.width = Math.round(rect.width * dpr);
     this.canvas.height = Math.round(rect.height * dpr);
-    if (wasFit) this.camera = { lon: 0, lat: 0, scale: this.fitScale() };
+    if (first) {
+      // First layout: restore the remembered view.
+      const p = PREFS.load();
+      this.camera = { lon: p.lon, lat: p.lat, scale: this.fitScale() * p.zoom };
+    } else if (wasFit) this.camera = { lon: 0, lat: 0, scale: this.fitScale() };
     else this.camera.scale = Math.max(this.camera.scale, this.fitScale());
     this.clampCamera();
     this.zoneCamera = null;
@@ -488,6 +506,7 @@ export class MapView {
   // --- Drawing ------------------------------------------------------------
 
   private requestDraw(): void {
+    if (this.size.w > 0) this.persist();
     if (this.frame) return;
     this.frame = requestAnimationFrame(() => {
       this.frame = 0;

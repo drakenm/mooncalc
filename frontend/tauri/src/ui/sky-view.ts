@@ -20,6 +20,7 @@ import { BackendError, type Backend, type SkySample, type SkyScene, type SkyScen
 import { changed, localDate, type Store } from '../state';
 import { debounce, h, replaceChildren } from './dom';
 import { formatDate, formatValue, valueSymbol } from './format';
+import { ViewPrefs } from './view-prefs';
 import {
   MOON_COLOR,
   SUN_COLOR,
@@ -49,6 +50,18 @@ import {
 type ViewKind = 'horizon' | 'allsky' | 'chart';
 
 const VIEW_LABELS: Record<ViewKind, string> = { horizon: 'Horizon', allsky: 'All-sky', chart: 'Star chart' };
+
+/** Display options remembered between sessions. */
+type SkyPrefs = { view: ViewKind; showStars: boolean; showPaths: boolean; showLabels: boolean; moonScale: number; spanDeg: number };
+const PREFS = new ViewPrefs<SkyPrefs>(
+  'mooncalc.view.sky.v1',
+  { view: 'horizon', showStars: true, showPaths: true, showLabels: true, moonScale: 6, spanDeg: 100 },
+  {
+    view: (v) => v in VIEW_LABELS,
+    moonScale: (v) => [1, 3, 6, 10].includes(v),
+    spanDeg: (v) => v >= 10 && v <= 360,
+  },
+);
 
 function chip(rgb: [number, number, number], code: string): HTMLElement {
   const el = h('span', { class: 'zone-chip' }, code);
@@ -94,12 +107,31 @@ export class SkyView {
   private autoAz = 270;
   private drag: { x: number; y: number } | null = null;
   /** Unproject a screen point to (alt, az) in the current view, if any. */
+  private readonly persist = debounce(
+    () =>
+      PREFS.save({
+        view: this.view,
+        showStars: this.showStars,
+        showPaths: this.showPaths,
+        showLabels: this.showLabels,
+        moonScale: this.moonScale,
+        spanDeg: this.spanDeg,
+      }),
+    300,
+  );
   private unproject: ((x: number, y: number) => { alt: number; az: number } | null) | null = null;
 
   constructor(
     private readonly backend: Backend,
     private readonly store: Store,
   ) {
+    const prefs = PREFS.load();
+    this.view = prefs.view;
+    this.showStars = prefs.showStars;
+    this.showPaths = prefs.showPaths;
+    this.showLabels = prefs.showLabels;
+    this.moonScale = prefs.moonScale;
+    this.spanDeg = prefs.spanDeg;
     this.stage = new Stage(this.stageEl, (ctx, w, hh) => this.draw(ctx, w, hh));
     this.stageEl.appendChild(this.hover);
     this.slider = new TimeSlider(
@@ -112,6 +144,7 @@ export class SkyView {
     const check = (text: string, value: boolean, set: (v: boolean) => void) => {
       const input = h('input', { type: 'checkbox', checked: value, onchange: (e: Event) => {
         set((e.target as HTMLInputElement).checked);
+        this.persist();
         this.stage.redraw();
       } });
       return h('label', { class: 'inline' }, input, text);
@@ -122,6 +155,7 @@ export class SkyView {
         'aria-label': 'Moon and Sun size',
         onchange: (e: Event) => {
           this.moonScale = Number((e.target as HTMLSelectElement).value);
+          this.persist();
           this.stage.redraw();
         },
       },
@@ -206,6 +240,7 @@ export class SkyView {
     this.view = kind;
     for (const [k, b] of Object.entries(this.viewButtons)) b.setAttribute('aria-pressed', String(k === kind));
     this.hover.hidden = true;
+    this.persist();
     this.stage.redraw();
   }
 
@@ -270,6 +305,7 @@ export class SkyView {
       if (this.view !== 'horizon') return;
       e.preventDefault();
       this.spanDeg = Math.max(10, Math.min(360, this.spanDeg * Math.exp(e.deltaY / 400)));
+      this.persist();
       this.stage.redraw();
     }, { passive: false });
     c.addEventListener('pointerdown', (e) => {
@@ -296,6 +332,7 @@ export class SkyView {
       this.spanDeg = 100;
       this.azOffset = 0;
       this.altOffset = 0;
+      this.persist();
       this.stage.redraw();
     });
   }
