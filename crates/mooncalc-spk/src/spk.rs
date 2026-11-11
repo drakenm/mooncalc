@@ -51,6 +51,29 @@ pub type StateVector = ([f64; 3], [f64; 3]);
 /// records, so a few slots suffice.
 const CACHE_SLOTS: usize = 4;
 
+/// Longest segment chain followed from a body to the root. The JPL DE
+/// files need 2 (Moon → Earth–Moon barycentre → solar system barycentre).
+const MAX_DEPTH: usize = 16;
+
+/// A chain of segments from a body toward the root of the segment tree.
+struct Path {
+    start: i32,
+    /// `(segment index, body reached)` per step.
+    steps: [(usize, i32); MAX_DEPTH],
+    len: usize,
+}
+
+impl Path {
+    /// The `i`-th body on the path, the start being body 0.
+    fn body(&self, i: usize) -> i32 {
+        if i == 0 {
+            self.start
+        } else {
+            self.steps[i - 1].1
+        }
+    }
+}
+
 /// The directory at the end of a type 2/3 segment (`SPKR02`).
 #[derive(Clone, Copy, Debug)]
 struct ChebDirectory {
@@ -257,18 +280,24 @@ impl<'a> Spk<'a> {
     }
 
     /// Segment indices leading from `body` toward the root at `et`, with
-    /// the body reached after each step.
-    fn path_to_root(&self, body: i32, et: f64) -> Result<Vec<(usize, i32)>, SpkError> {
-        let mut path = Vec::new();
+    /// the body reached after each step. Kept on the stack: a chain query
+    /// should not allocate.
+    fn path_to_root(&self, body: i32, et: f64) -> Result<Path, SpkError> {
+        let mut path = Path {
+            start: body,
+            steps: [(0, 0); MAX_DEPTH],
+            len: 0,
+        };
         let mut b = body;
         while let Some(i) = self.find_segment(b, et) {
-            b = self.segments[i].center;
-            path.push((i, b));
-            if path.len() > 64 {
+            if path.len == MAX_DEPTH {
                 return Err(SpkError::Corrupt(format!(
                     "segment chain from body {body} does not terminate"
                 )));
             }
+            b = self.segments[i].center;
+            path.steps[path.len] = (i, b);
+            path.len += 1;
         }
         Ok(path)
     }
@@ -287,21 +316,14 @@ impl<'a> Spk<'a> {
         let up_t = self.path_to_root(target, et)?;
         let up_c = self.path_to_root(center, et)?;
 
-        // Bodies visited from each end, starting with the end itself.
-        let bodies_t: Vec<i32> = std::iter::once(target)
-            .chain(up_t.iter().map(|p| p.1))
-            .collect();
-        let bodies_c: Vec<i32> = std::iter::once(center)
-            .chain(up_c.iter().map(|p| p.1))
-            .collect();
-
-        let Some((nt, nc)) = bodies_t
-            .iter()
-            .enumerate()
-            .find_map(|(i, b)| bodies_c.iter().position(|c| c == b).map(|j| (i, j)))
-        else {
+        // The first body on the target's path that is also on the center's.
+        let Some((nt, nc)) = (0..=up_t.len).find_map(|i| {
+            (0..=up_c.len)
+                .find(|&j| up_t.body(i) == up_c.body(j))
+                .map(|j| (i, j))
+        }) else {
             for (body, up) in [(target, &up_t), (center, &up_c)] {
-                if up.is_empty() && self.coverage(body).is_some() {
+                if up.len == 0 && self.coverage(body).is_some() {
                     return Err(SpkError::NoCoverage { body, et });
                 }
             }
@@ -310,7 +332,7 @@ impl<'a> Spk<'a> {
 
         let mut inner = self.lock();
         let mut acc = zero;
-        for (steps, sign) in [(&up_t[..nt], 1.0), (&up_c[..nc], -1.0)] {
+        for (steps, sign) in [(&up_t.steps[..nt], 1.0), (&up_c.steps[..nc], -1.0)] {
             for &(i, _) in steps {
                 let (p, v) = self.eval(&mut inner, i, et, want_velocity)?;
                 for k in 0..3 {
