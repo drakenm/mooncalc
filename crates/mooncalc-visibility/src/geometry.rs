@@ -44,4 +44,11 @@ pub struct CrescentGeometry {
     pub illuminated_fraction: f64,
     /// Moon's distance from the geocentre, km.
     pub moon_distance_km: f64,
+    /// Topocentric airless ARCV, degrees: the Moon's **topocentric**
+    /// altitude minus the Sun's altitude, both centre-to-centre and **without
+    /// refraction**, at the evaluation time. The Sun's parallax (< 9″) may be
+    /// neglected. Unlike [`Self::arcv_deg`] (geocentric Moon, Yallop's
+    /// definition), this is the quantity Odeh (2004, Exp. Astron. 18, 39, §5)
+    /// fits: "ARCV1, ARCV2 and ARCV3 are airless and topocentric".
+    pub arcv_topo_deg: f64,
 }
