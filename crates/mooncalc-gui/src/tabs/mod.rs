@@ -100,8 +100,32 @@ impl Tabs {
     /// Run every tab's background bookkeeping.
     pub fn poll(&mut self, ctx: &egui::Context, tc: &mut TabContext<'_>) {
         self.map.poll(ctx, tc);
+        self.report.poll(ctx, tc);
         // Placeholder tabs have no background work yet; give them a `poll`
         // when they gain jobs.
+    }
+
+    /// Carry out a File-menu action that needs a tab's data.
+    pub fn handle_menu(
+        &mut self,
+        action: crate::panels::menu::MenuAction,
+        ctx: &egui::Context,
+        tc: &mut TabContext<'_>,
+    ) {
+        use crate::panels::menu::MenuAction;
+        match action {
+            MenuAction::ExportMap(format) => {
+                tc.settings.view.active_tab = Tab::Map;
+                self.map.open_export(format);
+            }
+            MenuAction::CopyReport => match self.report.text() {
+                Some(text) => {
+                    ctx.copy_text(text);
+                    tc.status.notify("Report copied to the clipboard");
+                }
+                None => tc.status.error("The report has not been computed yet"),
+            },
+        }
     }
 
     /// Draw the active tab.
