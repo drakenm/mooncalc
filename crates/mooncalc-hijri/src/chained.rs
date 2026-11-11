@@ -165,12 +165,14 @@ where
         self.cache.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    /// The conjunction (JD UT) of lunation `k`.
+    /// The conjunction (JD UT) of lunation `k`. A non-finite result (an
+    /// ephemeris evaluated outside its range returns NaN) counts as a failed
+    /// computation, so the months that depend on it are `None`.
     pub fn conjunction(&self, k: i64) -> Option<f64> {
         if let Some(&c) = self.lock().conjunctions.get(&k) {
             return c;
         }
-        let c = (self.conjunction_near)(mean_new_moon(k));
+        let c = (self.conjunction_near)(mean_new_moon(k)).filter(|c| c.is_finite());
         self.lock().conjunctions.insert(k, c);
         c
     }
@@ -412,6 +414,33 @@ mod tests {
         backward.reverse();
         assert_eq!(forward, backward);
         assert_eq!(a.month_start(1440, 13), None);
+    }
+
+    #[test]
+    fn non_finite_conjunctions_give_no_months() {
+        // An ephemeris outside its range returns NaN. Before this was
+        // filtered, the NaN conjunction became civil day 0 and the months
+        // came out as JDN ~352 (4708 BC) instead of `None`.
+        let p = TwentyNinthDayProvider::new(|_| Some(f64::NAN), age_test(15.0));
+        assert_eq!(p.month_start(1600, 1), None);
+        assert_eq!(p.month_start(1600, 7), None);
+        let cal = ObservedCalendar::new(p, "t", "t", 1600, 1600);
+        assert_eq!(cal.month_start(1600, 3), None);
+        assert_eq!(cal.year_length(1600), None);
+        // Partly covered: months whose conjunctions are finite still work.
+        let edge = mean_new_moon(lunation_of_month(1446, 6));
+        let p = TwentyNinthDayProvider::new(
+            move |jd: f64| {
+                Some(if jd < edge {
+                    mean_new_moon_near(jd)
+                } else {
+                    f64::NAN
+                })
+            },
+            age_test(15.0),
+        );
+        assert!(p.month_start(1446, 3).is_some());
+        assert_eq!(p.month_start(1446, 8), None);
     }
 
     #[test]
