@@ -1,21 +1,38 @@
 //! The top menu bar.
 
-use crate::export::{self, ExportFormat};
+use crate::export::ExportFormat;
 use crate::settings::{Settings, ThemeChoice};
 use crate::status::StatusInfo;
 use crate::tabs::Tab;
 
-/// Draw the menu bar.
-pub fn menu_bar(ui: &mut egui::Ui, settings: &mut Settings, status: &mut StatusInfo) {
+/// A menu command that needs a tab's data (handled by
+/// [`crate::tabs::Tabs::handle_menu`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MenuAction {
+    /// Open the map export window with this format selected.
+    ExportMap(ExportFormat),
+    /// Copy the location report to the clipboard.
+    CopyReport,
+}
+
+/// Draw the menu bar. Returns the command chosen this frame, if any.
+pub fn menu_bar(
+    ui: &mut egui::Ui,
+    settings: &mut Settings,
+    _status: &mut StatusInfo,
+) -> Option<MenuAction> {
+    let mut action = None;
     egui::MenuBar::new().ui(ui, |ui| {
         ui.menu_button("File", |ui| {
             for format in [ExportFormat::Png, ExportFormat::Svg] {
                 if ui.button(format.menu_label()).clicked() {
-                    match export::export_map(format) {
-                        Ok(path) => status.notify(format!("Map saved to {}", path.display())),
-                        Err(e) => status.error(e),
-                    }
+                    action = Some(MenuAction::ExportMap(format));
+                    ui.close();
                 }
+            }
+            if ui.button("Copy report as text").clicked() {
+                action = Some(MenuAction::CopyReport);
+                ui.close();
             }
             ui.separator();
             if ui.button("Quit").clicked() {
@@ -52,4 +69,5 @@ pub fn menu_bar(ui: &mut egui::Ui, settings: &mut Settings, status: &mut StatusI
             }
         });
     });
+    action
 }

@@ -17,6 +17,7 @@ use crate::backend::BackendChoice;
 use crate::datetime;
 use crate::tabs::Tab;
 use crate::tabs::calendar::CalendarSettings;
+use crate::tabs::map::MapSettings;
 
 /// eframe storage key for [`Settings`].
 pub const SETTINGS_KEY: &str = "mooncalc.settings";
@@ -36,6 +37,8 @@ pub struct Settings {
     pub view: ViewSettings,
     /// Calendar-tab choices (selected Hijri calendar, month layout).
     pub calendar: CalendarSettings,
+    /// Map-tab display options (resolution, projection, layers, export).
+    pub map: MapSettings,
 }
 
 impl Default for Settings {
@@ -49,6 +52,7 @@ impl Default for Settings {
             de440_path: String::new(),
             view: ViewSettings::default(),
             calendar: CalendarSettings::default(),
+            map: MapSettings::default(),
         }
     }
 }
@@ -269,6 +273,10 @@ mod tests {
             calendar: CalendarSettings {
                 calendar_id: "tabular-2-civil".into(),
                 ..CalendarSettings::default()
+            },
+            map: MapSettings {
+                cities: true,
+                ..MapSettings::default()
             },
         }
     }

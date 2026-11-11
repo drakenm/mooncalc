@@ -12,11 +12,12 @@
 //! * [`jobs`]: background computation with progress, cancellation and
 //!   replace-on-new-request.
 //! * [`widgets`]: the date/time input and the zoomable map view.
-//! * Hooks for other crates: [`backend::create_ephemeris`] (ephemeris
-//!   backends), [`location::search_cities`] (city atlas),
-//!   [`criteria::criterion_options`] (criteria), [`tabs::map::compute_map_image`]
-//!   (visibility grid + renderer), [`export::export_map`] (PNG/SVG export),
-//!   [`attributions::ATTRIBUTIONS`] (credits).
+//! * Shared services: [`backend::resolve`] (the ephemeris every tab and job
+//!   uses), [`location::search_cities`] (city atlas),
+//!   [`criteria::criterion_options`] (criteria),
+//!   [`tabs::map::compute::compute_map`] (visibility grid),
+//!   [`export`] (PNG/SVG export, native dialogs), [`format`] (times and
+//!   angles as text), [`attributions::ATTRIBUTIONS`] (credits).
 
 pub mod app;
 pub mod attributions;
@@ -24,11 +25,11 @@ pub mod backend;
 pub mod criteria;
 pub mod datetime;
 pub mod export;
+pub mod format;
 pub mod icon;
 pub mod jobs;
 pub mod location;
 pub mod panels;
-pub mod placeholder_map;
 pub mod settings;
 pub mod sky;
 pub mod status;

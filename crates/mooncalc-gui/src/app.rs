@@ -90,9 +90,19 @@ impl eframe::App for MoonCalcApp {
             },
         );
 
-        egui::Panel::top("menu_bar").show(ui, |ui| {
-            menu::menu_bar(ui, settings, &mut ui_state.status);
-        });
+        let menu_action = egui::Panel::top("menu_bar")
+            .show(ui, |ui| menu::menu_bar(ui, settings, &mut ui_state.status))
+            .inner;
+        if let Some(action) = menu_action {
+            tabs.handle_menu(
+                action,
+                &ctx,
+                &mut TabContext {
+                    settings,
+                    status: &mut ui_state.status,
+                },
+            );
+        }
 
         if settings.view.show_status_bar {
             egui::Panel::bottom("status_bar").show(ui, |ui| {
