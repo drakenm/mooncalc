@@ -61,9 +61,27 @@ pub const ATTRIBUTIONS: &[Attribution] = &[
     },
     Attribution {
         name: "GeoNames",
-        usage: "The city atlas used by the location search.",
+        usage: mooncalc_atlas::ATTRIBUTION,
         license: "CC BY 4.0",
         url: Some("https://www.geonames.org"),
+    },
+    Attribution {
+        name: "hijridate by Mohammed Alshehri",
+        usage: mooncalc_hijri::umalqura::ATTRIBUTION_OFFICIAL,
+        license: "MIT",
+        url: Some("https://github.com/dralshehri/hijridate"),
+    },
+    Attribution {
+        name: "ICU (International Components for Unicode)",
+        usage: mooncalc_hijri::umalqura::ATTRIBUTION_ICU,
+        license: "Unicode License V3",
+        url: Some("https://github.com/unicode-org/icu"),
+    },
+    Attribution {
+        name: "R. H. van Gent, The Arithmetical or Tabular Islamic Calendar",
+        usage: "Intercalation schemes and epochs of the four tabular Hijri calendars.",
+        license: "Published method",
+        url: Some("https://webspace.science.uu.nl/~gent0113/islam/islam_tabcal_variants.htm"),
     },
     Attribution {
         name: "egui / eframe",
@@ -87,6 +105,9 @@ mod tests {
             "DE440",
             "Natural Earth",
             "GeoNames",
+            "hijridate",
+            "ICU",
+            "van Gent",
             "egui",
         ] {
             assert!(
@@ -97,5 +118,18 @@ mod tests {
         let geonames = ATTRIBUTIONS.iter().find(|a| a.name == "GeoNames").unwrap();
         assert_eq!(geonames.license, "CC BY 4.0");
         assert_eq!(geonames.url, Some("https://www.geonames.org"));
+        assert_eq!(geonames.usage, mooncalc_atlas::ATTRIBUTION);
+        let hijridate = ATTRIBUTIONS
+            .iter()
+            .find(|a| a.name.contains("hijridate"))
+            .unwrap();
+        assert_eq!(hijridate.license, "MIT");
+        assert!(hijridate.usage.contains("MIT"));
+        let icu = ATTRIBUTIONS
+            .iter()
+            .find(|a| a.name.contains("ICU"))
+            .unwrap();
+        assert_eq!(icu.license, "Unicode License V3");
+        assert!(icu.usage.contains("Unicode License V3"));
     }
 }
