@@ -130,6 +130,64 @@ Constants transcribed from the two papers: Yallop's q polynomial, the A–F thre
 - **Caveats:** HMNAO gives no city coordinates, so take them from the atlas and allow for the difference. HMNAO's own note says the Rabat and Dakhla offsets are "subject to confirmation". The extraction relies on the PDF's text order; sunset and moonset sequences were checked for continuity and the categories against HMNAO's prose.
 - **Tolerances:** sunset and moonset ±2 min. Category exact, or one step off when the computed q is within 0.03 of a boundary.
 
+## Results: Meeus backend
+
+Observed residuals of `mooncalc-core`'s Meeus backend, from the integration tests in `crates/mooncalc-core/tests/`. Run `cargo test -p mooncalc-core --test <name> -- --nocapture` to print them. Each cell is max / RMS of the absolute residual, computed − reference. RA and longitude residuals are measured on the sky (× cos δ, × cos β), and azimuth × cos alt.
+
+### Geocentric (`horizons_geocentric`)
+
+| Quantity | 1900–2100 (32 epochs) | Outside (12 epochs) |
+| --- | --- | --- |
+| Sun λ, full VSOP87D | 0.10″ / 0.07″ | 0.10″ / 0.07″ |
+| Sun λ, truncated | 0.18″ / 0.09″ | 0.19″ / 0.08″ |
+| Sun RA / Dec, full | 0.10″ / 0.06″, 0.06″ / 0.03″ | 0.10″ / 0.07″, 0.06″ / 0.03″ |
+| Sun β, full / truncated | 0.02″ / 0.01″, 0.05″ / 0.03″ | 0.03″ / 0.02″, 0.06″ / 0.03″ |
+| Sun distance, full | 7.5 / 4.5 km | 8.0 / 4.8 km |
+| Sun distance, truncated | 63 / 25 km | 58 / 34 km |
+| Moon λ | 6.1″ / 2.9″ | 8.9″ / 3.5″ |
+| Moon β | 2.4″ / 0.9″ | 2.0″ / 1.0″ |
+| Moon RA / Dec | 6.1″ / 2.7″, 3.1″ / 1.4″ | 8.9″ / 3.4″, 2.2″ / 1.3″ |
+| Moon geometric distance | 4.4 / 2.5 km | 6.5 / 3.6 km |
+| Moon vs raw `delta_km` | 41 / 28 km | 42 / 31 km |
+| Elongation (ARCL) | 5.9″ / 2.8″ | 9.2″ / 3.5″ |
+
+### Topocentric (`horizons_topocentric`, 30 rows per body)
+
+| Quantity | Sun | Moon |
+| --- | --- | --- |
+| Topocentric RA / Dec | 0.39″ / 0.17″, 0.14″ / 0.06″ | 5.4″ / 2.6″, 2.1″ / 1.2″ |
+| Airless azimuth | 8.3″ / 2.7″ | 5.4″ / 2.3″ |
+| Airless altitude | 8.0″ / 2.0″ | 6.2″ / 3.2″ |
+| Topocentric distance | 8.1 / 5.2 km (full), 35 / 20 km (truncated) | 4.2 / 2.7 km (geometric) |
+| Refracted altitude, 0–10° | 0.21″ / 0.15″ (2 rows) | 5.6″ / 3.1″ (6 rows) |
+| Refracted altitude, > 10° | 4.5″ / 1.7″ (7 rows) | 5.1″ / 2.7″ (15 rows) |
+
+Excluding the 2030 epoch, the Sun's airless alt/az residuals are ≤ 0.7″. The 2030 residuals come from the ΔT extrapolation: the core gives 69.86 s for 2030.67, while Horizons implies about 69.4 s. Before the extrapolation fix on this branch (`fix(core): extrapolate ΔT with a continuous rate`), the core gave 72.06 s there, and the 2030 rows were off by up to 41″, beyond the 0.01° tolerance.
+
+### ΔT (`deltat_fixtures`)
+
+| Comparison | Max / RMS |
+| --- | --- |
+| `espenak_meeus` vs the 42 polynomial checks | < 0.0005 s |
+| vs USNO 1657–1800 (286 rows) | 14.5 / 7.8 s |
+| vs USNO 1800–1900 (200 rows) | 1.3 / 0.5 s |
+| vs USNO 1900–1974 (146 rows) | 0.36 / 0.09 s |
+| vs USNO 1974–2026 (53 rows) | 0.086 / 0.028 s |
+| vs NASA Table 1 (−500 to 1950) | 13.7 / 3.3 s, every row within its standard error |
+| vs NASA Table 2 (1955–2005) | 0.10 / 0.04 s |
+| Raw Espenak–Meeus vs USNO, 1900–2005 / 2005–2026 | 0.29 / 0.08 s, 6.0 / 2.6 s |
+
+### Corrections to the suggested tolerances
+
+- **Moon distance.** Horizons' `delta` (and the DE440 backend's `distance_km`, which reproduces it) is the light-time range |r_moon(t − τ) − r_earth(t)| formed in the barycentric frame. The core's Meeus backend returns the geometric distance. To first order they differ by τ (v_E + v_rel) · û. For the Moon this is about +38 km · sin D, the Earth's orbital velocity over τ ≈ 1.28 s; its RMS of about 27 km matches the Meeus − DE440 RMS. Meeus' example 47.a shows the same thing: the book's 368 409.7 km is geometric, while Horizons' 368 439.4 km is the light-time range. Converted to geometric, Horizons gives 368 405.5 km, 4.2 km from the book. So:
+  - compared with a geometric distance (Horizons' range converted as in `crates/mooncalc-core/tests/common/mod.rs`), the suggested ≤ 15 km stands (observed ≤ 6.5 km);
+  - compared with the raw light-time range, or with the DE440 backend's distance, allow **≤ 60 km** (observed ≤ 42 km).
+- **Moon longitude:** ≤ **15″** for 1900–2100 (30″ outside) instead of 18″. Meeus − DE440 over 10 000 epochs in 1900–2100 reaches 12.7″ (RMS 2.7″) in longitude and 5.3″ (RMS 1.0″) in latitude. These 44 epochs reach 6.1″.
+- **Sun:** with either series the longitude error is ≤ 0.2″ (Meeus − DE440: 0.15″), far inside the 10″ suggested. The suggestion gives no distance limit. The full series is within 8 km of Horizons, the remainder being the Sun's barycentric light-time term, which the heliocentric VSOP87D cannot supply. The truncated series is within 63 km of Horizons and 107 km of DE440, inside its documented 10⁻⁶ AU (150 km) truncation bound and equal to 0.001″ of solar semi-diameter.
+- **Topocentric refraction:** Horizons' "approximate atmospheric yellow-light refraction" is Sæmundsson's formula (Meeus eq. 16.4) at 1010 mbar and 10 °C, including Meeus' zenith constant, held at its −1° value below that altitude. `refracted − airless` matches `refraction_from_true(alt, Atmosphere::STANDARD)` to 0.000′ on all 60 rows, so the refracted altitude can be held to the airless tolerance. Bennett (eq. 16.3), inverted, is up to 0.06′ lower.
+- **Topocentric time scale:** convert Horizons' UTC `jd_ut` to TT with the leap-second table (TT = UTC + 32.184 s + (TAI − UTC)), then to UT1 with the core's ΔT, the same path an application uses. With the core's ΔT, UT1 − UTC comes out at +0.38 s (2000), −0.67 s (2015) and within ±0.06 s (2024–2025), against IERS values of +0.355 s, −0.67 s and ≈ 0 s.
+- **ΔT before 1800:** the USNO historic series is an older reconstruction that runs up to 14 s above Meeus Table 10.A and Morrison & Stephenson (2004) around 1680–1720 (1700: USNO 21 s, NASA 9 ± 5 s, core 7 s). The suggested max(3 s, error) fails for 82 of the 146 rows before 1730, while every row is within 2.2 × its stated error. The test uses max(3 s, 2.5 × error) for 1657–1800 and the suggested limit from 1800.
+
 ## Gaps
 
 - **Odeh Table VI:** the 159 records with V > 8.18 are absent from the available PDF.
