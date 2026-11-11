@@ -1,0 +1,10 @@
+[package]
+name = "mooncalc-hijri"
+description = "Islamic (Hijri) calendars: tabular/arithmetic variants, Umm al-Qura, and visibility-based calendars."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+mooncalc-core.workspace = true

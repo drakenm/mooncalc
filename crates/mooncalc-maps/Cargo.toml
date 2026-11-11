@@ -1,0 +1,11 @@
+[package]
+name = "mooncalc-maps"
+description = "World crescent-visibility maps: grid evaluation, projections, coastline base map, raster/SVG rendering."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+mooncalc-core.workspace = true
+mooncalc-visibility.workspace = true

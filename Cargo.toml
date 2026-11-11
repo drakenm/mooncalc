@@ -1,0 +1,41 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/mooncalc-core",
+    "crates/mooncalc-visibility",
+    "crates/mooncalc-maps",
+    "crates/mooncalc-hijri",
+    "crates/mooncalc-atlas",
+    "crates/mooncalc-spk",
+    "crates/mooncalc-gui",
+]
+default-members = ["crates/mooncalc-gui"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/drakenm/mooncalc"
+rust-version = "1.90"
+
+[workspace.dependencies]
+mooncalc-core = { path = "crates/mooncalc-core" }
+mooncalc-visibility = { path = "crates/mooncalc-visibility" }
+mooncalc-maps = { path = "crates/mooncalc-maps" }
+mooncalc-hijri = { path = "crates/mooncalc-hijri" }
+mooncalc-atlas = { path = "crates/mooncalc-atlas" }
+mooncalc-spk = { path = "crates/mooncalc-spk" }
+
+# Third-party pins (released >= 14 days before adoption; see AGENTS.md).
+eframe = { version = "=0.37.0", features = ["persistence"] }
+egui = "=0.37.0"
+egui_extras = "=0.37.0"
+png = "=0.18.1"
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = "=1.0.154"
+
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.release]
+lto = "thin"
