@@ -15,8 +15,9 @@
 //! `wasm32-unknown-unknown`. The path helpers [`Spk::open`] and
 //! [`Spk::open_in_memory`] are only available off WASM.
 //!
-//! The apparent-place [`mooncalc_core::Ephemeris`] backend is planned in
-//! [`de440`].
+//! [`de440::De440Ephemeris`] builds the geocentric apparent-place
+//! [`mooncalc_core::Ephemeris`] backend on top: light time, aberration,
+//! precession and nutation.
 
 pub mod daf;
 pub mod de440;
@@ -29,6 +30,7 @@ mod cheb;
 mod spk;
 
 pub use daf::{ByteOrder, FileRecord};
+pub use de440::{ApparentPlace, Body, De440Ephemeris, FrameModel, SunMoon};
 pub use error::SpkError;
 pub use source::{ByteSource, MemorySource, ReaderSource};
 pub use spk::{Segment, Spk, StateVector};
