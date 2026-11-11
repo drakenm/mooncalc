@@ -120,6 +120,8 @@ pub fn run() {
             commands::sky::moon_features,
             commands::search_cities,
             commands::nearest_city,
+            commands::time_zone_offsets,
+            commands::time_zone_names,
             commands::earliest_sighting,
             commands::basemap,
             commands::load_de440,

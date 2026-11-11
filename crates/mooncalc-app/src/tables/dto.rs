@@ -26,6 +26,13 @@ pub struct EphemerisTableParams {
     pub location: Option<Location>,
     #[serde(default)]
     pub ephemeris_id: Option<String>,
+    /// Offset of local civil time from UT, hours, used when `time_zone` is
+    /// absent: only sets the results' `offset_hours`.
+    #[serde(default)]
+    pub tz_offset_hours: f64,
+    /// IANA time zone for the results' `offset_hours`.
+    #[serde(default)]
+    pub time_zone: Option<String>,
 }
 
 /// The topocentric columns of one body.
@@ -123,9 +130,14 @@ pub struct RiseSetParams {
     pub year: i32,
     /// 1..=12.
     pub month: u32,
-    /// Offset of local civil time from UT, hours: the local days the events
-    /// are grouped by.
+    /// Fixed offset of local civil time from UT, hours, used when
+    /// `time_zone` is absent: the local days the events are grouped by.
+    #[serde(default)]
     pub tz_offset_hours: f64,
+    /// IANA time zone whose midnights bound the days (a day across a DST
+    /// change lasts 23 or 25 hours). Takes precedence over `tz_offset_hours`.
+    #[serde(default)]
+    pub time_zone: Option<String>,
     pub location: Location,
     #[serde(default)]
     pub ephemeris_id: Option<String>,
@@ -180,7 +192,11 @@ pub struct RiseSetDay {
 pub struct RiseSetMonth {
     pub year: i32,
     pub month: u32,
+    /// The offset at local noon on the 1st, hours (every time also carries
+    /// its own `offset_hours`).
     pub tz_offset_hours: f64,
+    /// The IANA zone used, if any.
+    pub time_zone: Option<String>,
     pub location: Location,
     pub days: Vec<RiseSetDay>,
     pub ephemeris: String,
@@ -199,6 +215,10 @@ pub struct YearParams {
     /// The year runs from local midnight on 1 January in this zone.
     #[serde(default)]
     pub tz_offset_hours: f64,
+    /// IANA time zone: the year runs from local midnight on 1 January under
+    /// its rules. Takes precedence over `tz_offset_hours`.
+    #[serde(default)]
+    pub time_zone: Option<String>,
     #[serde(default)]
     pub ephemeris_id: Option<String>,
 }
@@ -334,6 +354,13 @@ pub struct EclipsesParams {
     pub location: Option<Location>,
     #[serde(default)]
     pub ephemeris_id: Option<String>,
+    /// Offset of local civil time from UT, hours, used when `time_zone` is
+    /// absent: only sets the results' `offset_hours`.
+    #[serde(default)]
+    pub tz_offset_hours: f64,
+    /// IANA time zone for the results' `offset_hours`.
+    #[serde(default)]
+    pub time_zone: Option<String>,
 }
 
 /// A contact of a solar eclipse at the observer.

@@ -184,7 +184,7 @@ impl std::fmt::Debug for SkyTab {
 
 /// The coverage problem of the night for `key`, if any.
 fn coverage_problem(key: &NightKey, settings: &crate::settings::Settings) -> Option<String> {
-    let noon = civil_noon(key.date, key.tz_hours);
+    let noon = civil_noon(key.date, key.zone);
     crate::backend::resolve(settings.backend, &settings.de440_path).span_problem(
         noon,
         noon,

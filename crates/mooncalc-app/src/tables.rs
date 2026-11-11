@@ -52,6 +52,8 @@ use mooncalc_core::{Ephemeris, GeoLocation};
 use crate::dto::{ApiError, CivilDate, Location, UtDateTime};
 use crate::ephemeris::check_covers;
 use crate::validate;
+use crate::zone::{self, Localize, localize_fields};
+use mooncalc_atlas::Zone;
 
 /// Most rows one table request may ask for.
 pub const MAX_TABLE_ROWS: u32 = 10_000;
@@ -92,22 +94,16 @@ fn check_time(t: &UtDateTime) -> Result<(), ApiError> {
 }
 
 /// UT bounds of local `year` (midnight to midnight in the zone).
-fn year_bounds(year: i32, tz: f64) -> (Instant, Instant) {
-    let start = Instant::from_calendar(year, 1, 1, 0, 0, 0.0).add_days(-tz / 24.0);
-    let end = Instant::from_calendar(year + 1, 1, 1, 0, 0, 0.0).add_days(-tz / 24.0);
-    (start, end)
-}
-
-fn check_year(eph: &dyn Ephemeris, p: &YearParams) -> Result<(Instant, Instant), ApiError> {
+fn check_year(eph: &dyn Ephemeris, p: &YearParams) -> Result<(Instant, Instant, Zone), ApiError> {
     if !(-4000..=9999).contains(&p.year) {
         return Err(ApiError::invalid_params(
             "year must be between -4000 and 9999",
         ));
     }
-    validate::tz_offset(p.tz_offset_hours)?;
-    let (t0, t1) = year_bounds(p.year, p.tz_offset_hours);
+    let zone = zone::resolve(p.tz_offset_hours, p.time_zone.as_deref())?;
+    let (t0, t1) = zone.year_bounds(p.year);
     check_covers(eph, t0.jd_tt() - 40.0, t1.jd_tt() + 40.0)?;
-    Ok((t0, t1))
+    Ok((t0, t1, zone))
 }
 
 // ---------------------------------------------------------------------------
@@ -164,6 +160,7 @@ pub fn row_dto(r: &EphemerisRow) -> EphemerisRowDto {
 /// Validate a table request; returns the row count.
 pub fn check_table(eph: &dyn Ephemeris, p: &EphemerisTableParams) -> Result<usize, ApiError> {
     check_time(&p.start)?;
+    zone::resolve(p.tz_offset_hours, p.time_zone.as_deref())?;
     if !(0.1..=525_600.0).contains(&p.step_minutes) {
         return Err(ApiError::invalid_params(
             "stepMinutes must be between 0.1 and 525600",
@@ -203,10 +200,14 @@ pub fn table_rows(
         location: p.location.map(GeoLocation::from),
         ..TableOptions::default()
     };
-    mooncalc_core::tables::ephemeris_table(eph, start, step, range.len(), &opts)
-        .iter()
-        .map(row_dto)
-        .collect()
+    let zone = zone::resolve(p.tz_offset_hours, p.time_zone.as_deref()).unwrap_or_default();
+    let mut rows: Vec<EphemerisRowDto> =
+        mooncalc_core::tables::ephemeris_table(eph, start, step, range.len(), &opts)
+            .iter()
+            .map(row_dto)
+            .collect();
+    rows.localize(zone);
+    rows
 }
 
 /// A whole table in one call.
@@ -279,14 +280,14 @@ pub fn rise_set_month(eph: &dyn Ephemeris, p: &RiseSetParams) -> Result<RiseSetM
         day: 1,
     })?;
     validate::location(p.location)?;
-    validate::tz_offset(p.tz_offset_hours)?;
+    let zone = zone::resolve(p.tz_offset_hours, p.time_zone.as_deref())?;
     let first = CalendarDate::new(p.year, p.month, 1);
     let dates: Vec<CalendarDate> = (0..31)
         .map(|i| first.add_days(i))
         .take_while(|d| d.month == p.month)
         .collect();
-    let (start, _) = first.local_day(p.tz_offset_hours);
-    let end = start.add_days(dates.len() as f64);
+    let (start, _) = zone.day_bounds(first);
+    let (_, end) = zone.day_bounds(*dates.last().expect("a month has days"));
     check_covers(eph, start.jd_tt() - 2.0, end.jd_tt() + 2.0)?;
     let table = ApparentTable::with_default_step(eph, start.add_days(-1.0), end.add_days(1.0));
     let loc = GeoLocation::from(p.location);
@@ -294,7 +295,7 @@ pub fn rise_set_month(eph: &dyn Ephemeris, p: &RiseSetParams) -> Result<RiseSetM
     let days = dates
         .into_iter()
         .map(|date| {
-            let (t0, t1) = date.local_day(p.tz_offset_hours);
+            let (t0, t1) = zone.day_bounds(date);
             RiseSetDay {
                 date: date.into(),
                 sun: body_day(&table, &obs, &loc, Body::Sun, t0, t1),
@@ -305,14 +306,17 @@ pub fn rise_set_month(eph: &dyn Ephemeris, p: &RiseSetParams) -> Result<RiseSetM
             }
         })
         .collect();
-    Ok(RiseSetMonth {
+    let mut month = RiseSetMonth {
         year: p.year,
         month: p.month,
-        tz_offset_hours: p.tz_offset_hours,
+        tz_offset_hours: zone.offset_hours(zone.civil_noon(first).jd_ut),
+        time_zone: zone.iana_name().map(str::to_owned),
         location: p.location,
         days,
         ephemeris: eph.name().into(),
-    })
+    };
+    month.localize(zone);
+    Ok(month)
 }
 
 // ---------------------------------------------------------------------------
@@ -322,7 +326,7 @@ pub fn rise_set_month(eph: &dyn Ephemeris, p: &RiseSetParams) -> Result<RiseSetM
 /// The principal phases of the local year, grouped by lunation, with the
 /// Moon's age at each and each lunation's length.
 pub fn lunar_phases(eph: &dyn Ephemeris, p: &YearParams) -> Result<LunarPhasesYear, ApiError> {
-    let (t0, t1) = check_year(eph, p)?;
+    let (t0, t1, zone) = check_year(eph, p)?;
     let mut by_k: BTreeMap<i64, [Option<Instant>; 4]> = BTreeMap::new();
     for (phase, t) in phases_between(eph, t0, t1) {
         let i = Phase::ALL.iter().position(|q| *q == phase).unwrap_or(0);
@@ -345,17 +349,19 @@ pub fn lunar_phases(eph: &dyn Ephemeris, p: &YearParams) -> Result<LunarPhasesYe
             }
         })
         .collect();
-    Ok(LunarPhasesYear {
+    let mut year = LunarPhasesYear {
         year: p.year,
         lunations,
         ephemeris: eph.name().into(),
-    })
+    };
+    year.localize(zone);
+    Ok(year)
 }
 
 /// Perigees and apogees, node passages and declination extremes of the
 /// local year.
 pub fn apsides_nodes(eph: &dyn Ephemeris, p: &YearParams) -> Result<ApsidesNodesYear, ApiError> {
-    let (t0, t1) = check_year(eph, p)?;
+    let (t0, t1, zone) = check_year(eph, p)?;
     let (a, b) = (t0.jd_tt(), t1.jd_tt());
     let apsides = apsides_between(Some(eph), a, b)
         .into_iter()
@@ -396,13 +402,15 @@ pub fn apsides_nodes(eph: &dyn Ephemeris, p: &YearParams) -> Result<ApsidesNodes
             dec_deg: deg(d.dec),
         })
         .collect();
-    Ok(ApsidesNodesYear {
+    let mut year = ApsidesNodesYear {
         year: p.year,
         apsides,
         nodes,
         declinations,
         ephemeris: eph.name().into(),
-    })
+    };
+    year.localize(zone);
+    Ok(year)
 }
 
 fn season_code(s: Season) -> (&'static str, &'static str) {
@@ -417,7 +425,7 @@ fn season_code(s: Season) -> (&'static str, &'static str) {
 /// Equinoxes and solstices of the year, and the equation of time at local
 /// noon of every day.
 pub fn seasons(eph: &dyn Ephemeris, p: &YearParams) -> Result<SeasonsYear, ApiError> {
-    let (t0, t1) = check_year(eph, p)?;
+    let (_, _, zone) = check_year(eph, p)?;
     let eot = |t: Instant| equation_of_time(eph, t.jd_tt()) * MIN_PER_RAD;
     let jd = seasons_of_year(eph, p.year);
     let seasons = Season::ALL
@@ -434,20 +442,25 @@ pub fn seasons(eph: &dyn Ephemeris, p: &YearParams) -> Result<SeasonsYear, ApiEr
             }
         })
         .collect();
-    let days = (t1.jd_ut - t0.jd_ut).round() as i32;
     let jan1 = CalendarDate::new(p.year, 1, 1);
+    let days = (CalendarDate::new(p.year + 1, 1, 1).jd0() - jan1.jd0()).round() as i32;
     let equation_of_time = (0..days)
-        .map(|d| EquationOfTimePoint {
-            date: jan1.add_days(d).into(),
-            minutes: eot(t0.add_days(f64::from(d) + 0.5)),
+        .map(|d| {
+            let date = jan1.add_days(d);
+            EquationOfTimePoint {
+                date: date.into(),
+                minutes: eot(zone.civil_noon(date)),
+            }
         })
         .collect();
-    Ok(SeasonsYear {
+    let mut year = SeasonsYear {
         year: p.year,
         seasons,
         equation_of_time,
         ephemeris: eph.name().into(),
-    })
+    };
+    year.localize(zone);
+    Ok(year)
 }
 
 // ---------------------------------------------------------------------------
@@ -476,8 +489,9 @@ pub fn eclipse_candidates(
     if let Some(l) = p.location {
         validate::location(l)?;
     }
-    let (t0, _) = year_bounds(p.first_year, 0.0);
-    let (_, t1) = year_bounds(p.last_year, 0.0);
+    zone::resolve(p.tz_offset_hours, p.time_zone.as_deref())?;
+    let (t0, _) = Zone::UTC.year_bounds(p.first_year);
+    let (_, t1) = Zone::UTC.year_bounds(p.last_year);
     check_covers(eph, t0.jd_tt() - 2.0, t1.jd_tt() + 2.0)?;
     let filter = match p.filter {
         EclipseKindFilter::Any => EclipseFilter::Any,
@@ -638,7 +652,7 @@ pub fn eclipse_details(
 /// Every eclipse of the years with details, in one call.
 pub fn eclipses(eph: &dyn Ephemeris, p: &EclipsesParams) -> Result<EclipseList, ApiError> {
     let list = eclipse_candidates(eph, p)?;
-    Ok(EclipseList {
+    let mut result = EclipseList {
         first_year: p.first_year,
         last_year: p.last_year,
         location: p.location,
@@ -647,7 +661,33 @@ pub fn eclipses(eph: &dyn Ephemeris, p: &EclipsesParams) -> Result<EclipseList, 
             .map(|e| eclipse_details(eph, e, p.location))
             .collect(),
         ephemeris: eph.name().into(),
-    })
+    };
+    result.localize(zone::resolve(p.tz_offset_hours, p.time_zone.as_deref())?);
+    Ok(result)
+}
+
+localize_fields! {
+    EphemerisRowDto: time, conjunction;
+    AngledEventDto: time;
+    BodyDayDto: rise, transit, set;
+    TwilightDto: dawn, dusk;
+    RiseSetDay: sun, moon, civil, nautical, astronomical;
+    RiseSetMonth: days;
+    LunationDto: new_moon, phases;
+    LunarPhasesYear: lunations;
+    ApsisDto: time;
+    NodeDto: time;
+    DeclinationDto: time;
+    ApsidesNodesYear: apsides, nodes, declinations;
+    SeasonDto: time;
+    SeasonsYear: seasons;
+    SolarContactDto: time;
+    LocalSolarDto: c1, c2, max, c3, c4;
+    SolarEclipseDto: local;
+    LunarContactDto: time;
+    LunarEclipseDto: contacts;
+    EclipseDto: greatest, solar, lunar;
+    EclipseList: eclipses;
 }
 
 #[cfg(test)]
@@ -666,6 +706,7 @@ mod tests {
             hour,
             minute,
             second: 0.0,
+            offset_hours: None,
         }
     }
 
@@ -691,8 +732,11 @@ mod tests {
             count: 25,
             location: Some(DALLAS),
             ephemeris_id: None,
+            tz_offset_hours: -6.0,
+            time_zone: None,
         };
         let table = ephemeris_table(&*e, &p).unwrap();
+        assert_eq!(table.rows[0].time.offset_hours, Some(-6.0));
         assert_eq!(table.rows.len(), 25);
         let r = &table.rows[0];
         assert!((r.moon.lon_deg - 133.16).abs() < 0.03, "{}", r.moon.lon_deg);
@@ -738,6 +782,7 @@ mod tests {
                 year: 2024,
                 month: 3,
                 tz_offset_hours: 3.0,
+                time_zone: None,
                 location: Location {
                     lat_deg: 21.4225,
                     lon_deg: 39.8262,
@@ -772,6 +817,7 @@ mod tests {
             &YearParams {
                 year: 2024,
                 tz_offset_hours: 0.0,
+                time_zone: None,
                 ephemeris_id: None,
             },
         )
@@ -801,6 +847,7 @@ mod tests {
             &YearParams {
                 year: 2024,
                 tz_offset_hours: 0.0,
+                time_zone: None,
                 ephemeris_id: None,
             },
         )
@@ -838,6 +885,7 @@ mod tests {
             &YearParams {
                 year: 2024,
                 tz_offset_hours: 0.0,
+                time_zone: None,
                 ephemeris_id: None,
             },
         )
@@ -876,6 +924,8 @@ mod tests {
                 filter: EclipseKindFilter::Any,
                 location: Some(DALLAS),
                 ephemeris_id: None,
+                tz_offset_hours: 0.0,
+                time_zone: Some("America/Chicago".into()),
             },
         )
         .unwrap();
@@ -901,6 +951,8 @@ mod tests {
             ..t(2024, 4, 8, 18, 42)
         };
         assert!(minutes_between(&local.max.time, &nasa).abs() < 1.0);
+        // 13:42 CDT; the March lunar eclipse fell before the US change.
+        assert_eq!(local.max.time.offset_hours, Some(-5.0));
         let totality = local.central_duration_min.unwrap();
         assert!((totality - 3.92).abs() < 0.2, "{totality}");
         assert!((63.5..64.7).contains(&local.max.sun_alt_deg));
@@ -921,6 +973,8 @@ mod tests {
                 filter: EclipseKindFilter::Solar,
                 location: None,
                 ephemeris_id: None,
+                tz_offset_hours: 0.0,
+                time_zone: None,
             },
         )
         .unwrap();
@@ -936,6 +990,8 @@ mod tests {
                     filter: EclipseKindFilter::Any,
                     location: None,
                     ephemeris_id: None,
+                    tz_offset_hours: 0.0,
+                    time_zone: None,
                 }
             )
             .is_err()

@@ -21,6 +21,7 @@
 //! | [`moon`] | [`moon::moon_view`], [`moon::moon_features`]: physical ephemeris, libration curve, craters and maria |
 //! | [`calendar`] | [`calendar::CalendarEngine`]: Hijri calendars, month views, converter, month-start comparison |
 //! | [`tables`] | [`tables::ephemeris_table`], rise/set, phases, apsides and nodes, eclipses, seasons |
+//! | [`zone`] | request time zones (IANA or fixed), [`zone::time_zone_offsets`], [`zone::time_zone_names`] |
 //!
 //! # Portability
 //!
@@ -47,6 +48,7 @@ pub mod sky;
 pub mod tables;
 pub mod trajectory;
 pub mod validate;
+pub mod zone;
 
 #[cfg(test)]
 mod wire_tests {

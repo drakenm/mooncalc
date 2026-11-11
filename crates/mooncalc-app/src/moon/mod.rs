@@ -428,6 +428,7 @@ mod tests {
                 hour,
                 minute: 0,
                 second: 0.0,
+                offset_hours: None,
             },
             location: Some(Location {
                 lat_deg: 21.4225,

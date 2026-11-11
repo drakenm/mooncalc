@@ -8,6 +8,7 @@
 
 use std::ops::Deref;
 
+use mooncalc_atlas::Zone;
 use mooncalc_core::events::CalendarDate;
 use mooncalc_core::{Ephemeris, GeoLocation};
 use mooncalc_visibility::circumstances::Sighting;
@@ -33,7 +34,7 @@ pub fn ephemeris(settings: &Settings) -> std::sync::Arc<dyn Ephemeris> {
 #[derive(Clone, Debug, PartialEq)]
 pub struct NightKey {
     pub date: CalendarDate,
-    pub tz_hours: f64,
+    pub zone: Zone,
     pub location: GeoLocation,
     pub crescent: Crescent,
     pub criterion_id: String,
@@ -43,8 +44,8 @@ pub struct NightKey {
 impl NightKey {
     pub fn from_settings(s: &Settings) -> Self {
         Self {
-            date: local_date(s.time.jd_ut, s.time.tz_offset_hours),
-            tz_hours: s.time.tz_offset_hours,
+            date: local_date(s.time.jd_ut, s.time.zone()),
+            zone: s.time.zone(),
             location: s.observer(),
             crescent: s.crescent,
             criterion_id: s.criterion_id.clone(),
@@ -69,7 +70,7 @@ impl Night {
         let scene = NightScene::compute(
             eph,
             key.date,
-            key.tz_hours,
+            key.zone,
             key.location,
             sighting,
             &key.criterion_id,
@@ -89,7 +90,7 @@ impl Deref for Night {
 #[derive(Clone, Debug, PartialEq)]
 pub struct DayKey {
     pub date: CalendarDate,
-    pub tz_hours: f64,
+    pub zone: Zone,
     pub location: GeoLocation,
     pub backend: BackendChoice,
 }
@@ -97,8 +98,8 @@ pub struct DayKey {
 impl DayKey {
     pub fn new(s: &Settings, jd_ut: f64) -> Self {
         Self {
-            date: local_date(jd_ut, s.time.tz_offset_hours),
-            tz_hours: s.time.tz_offset_hours,
+            date: local_date(jd_ut, s.time.zone()),
+            zone: s.time.zone(),
             location: s.observer(),
             backend: s.backend.effective(),
         }
@@ -114,7 +115,7 @@ pub struct Day {
 
 impl Day {
     pub fn compute(key: DayKey, eph: &dyn Ephemeris) -> Self {
-        let scene = DayScene::compute(eph, key.date, key.tz_hours, key.location);
+        let scene = DayScene::compute(eph, key.date, key.zone, key.location);
         Self { key, scene }
     }
 }
@@ -140,7 +141,7 @@ mod tests {
     fn night_key(date: CalendarDate, loc: GeoLocation, tz: f64) -> NightKey {
         NightKey {
             date,
-            tz_hours: tz,
+            zone: Zone::fixed_hours(tz),
             location: loc,
             crescent: Crescent::Evening,
             criterion_id: "yallop".into(),
@@ -206,7 +207,7 @@ mod tests {
         let eph = MeeusEphemeris::new();
         let key = DayKey {
             date: CalendarDate::new(2024, 3, 11),
-            tz_hours: 0.0,
+            zone: Zone::UTC,
             location: GeoLocation::new(51.5074, -0.1278, 11.0),
             backend: BackendChoice::Meeus,
         };

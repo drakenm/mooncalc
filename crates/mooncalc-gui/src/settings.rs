@@ -156,6 +156,11 @@ impl TimeSettings {
         }
     }
 
+    /// The time zone for local times.
+    pub fn zone(&self) -> mooncalc_atlas::Zone {
+        mooncalc_atlas::Zone::fixed_hours(self.tz_offset_hours)
+    }
+
     /// Julian Day in local time (UT + time-zone offset).
     pub fn jd_local(&self) -> f64 {
         self.jd_ut + self.tz_offset_hours / 24.0

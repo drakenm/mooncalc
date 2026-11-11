@@ -119,7 +119,7 @@ impl TrajectoryTab {
         }
         let key = DayKey::new(tc.settings, self.time);
         let tz = tc.settings.time.tz_offset_hours;
-        let start = key.date.jd0() - key.tz_hours / 24.0;
+        let start = key.zone.day_bounds(key.date).0.jd_ut;
         self.controls(ui, tc, start, tz);
 
         let active = crate::backend::resolve(tc.settings.backend, &tc.settings.de440_path);

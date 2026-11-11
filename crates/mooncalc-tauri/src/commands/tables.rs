@@ -10,6 +10,7 @@ use mooncalc_app::tables::{
     self, ApsidesNodesYear, DEFAULT_TABLE_CHUNK, EclipseList, EclipsesParams, EphemerisTable,
     EphemerisTableParams, LunarPhasesYear, RiseSetMonth, RiseSetParams, SeasonsYear, YearParams,
 };
+use mooncalc_app::zone::{self, Localize};
 use tauri::State;
 
 use super::{blocking, trace};
@@ -128,16 +129,19 @@ pub async fn eclipses(
     let eph = state.ephemeris(params.ephemeris_id.as_deref())?;
     blocking(move || {
         let list = tables::eclipse_candidates(&*eph, &params)?;
+        let zone = zone::resolve(params.tz_offset_hours, params.time_zone.as_deref())?;
         let eclipses = parallel_map(&list, |e| {
             tables::eclipse_details(&*eph, e, params.location)
         });
-        Ok(EclipseList {
+        let mut result = EclipseList {
             first_year: params.first_year,
             last_year: params.last_year,
             location: params.location,
             eclipses,
             ephemeris: eph.name().into(),
-        })
+        };
+        result.localize(zone);
+        Ok(result)
     })
     .await
 }
