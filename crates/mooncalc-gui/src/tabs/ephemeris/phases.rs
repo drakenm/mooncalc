@@ -17,7 +17,9 @@ use super::{
     EphKey, app_year, busy, ephemeris, error_line, set_app_time, time_link, year_bounds,
     year_picker,
 };
+use super::{LUNATION_MARGIN, coverage, year_coverage};
 use crate::tabs::TabContext;
+use crate::widgets::coverage::coverage_notice;
 
 /// Epoch of Meeus' lunation numbers (k = 0: new Moon of 2000 January 6).
 const LUNATION_EPOCH_JDE: f64 = 2_451_550.097_66;
@@ -80,8 +82,14 @@ pub struct PhasesView {
 }
 
 impl PhasesView {
+    /// The year's lunations need the new Moons before and after it.
+    fn coverage(&self, tc: &TabContext<'_>) -> Option<String> {
+        let year = self.year.unwrap_or(app_year(tc.settings));
+        year_coverage(tc.settings, year, LUNATION_MARGIN)
+    }
+
     pub fn poll(&mut self, ctx: &egui::Context, tc: &mut TabContext<'_>, visible: bool) {
-        if visible {
+        if visible && self.coverage(tc).is_none() {
             let req = Request {
                 year: self.year.unwrap_or(app_year(tc.settings)),
                 tz: tc.settings.time.tz_offset_hours,
@@ -104,14 +112,21 @@ impl PhasesView {
             year_picker(ui, &mut self.year, app_year(tc.settings));
             ui.separator();
             let now = tc.settings.instant();
-            ui.label(format!(
-                "Moon's age at the app time: {:.2} days",
-                moon_age_days(eph.as_ref(), now)
-            ));
+            // The age needs the previous new Moon.
+            if coverage(tc.settings, now.jd_ut, now.jd_ut, LUNATION_MARGIN, 1.0).is_none() {
+                ui.label(format!(
+                    "Moon's age at the app time: {:.2} days",
+                    moon_age_days(eph.as_ref(), now)
+                ));
+            }
         });
         ui.weak(
             "Age: days since the new Moon that starts the lunation. k: Meeus/NASA lunation number.",
         );
+        if let Some(problem) = self.coverage(tc) {
+            coverage_notice(ui, &problem);
+            return;
+        }
         error_line(ui, &self.job.error);
         busy(ui, self.job.is_running());
         let Some(rows) = self.job.get() else {

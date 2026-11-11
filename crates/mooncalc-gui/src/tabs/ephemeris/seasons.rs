@@ -8,11 +8,13 @@ use mooncalc_core::seasons::{equation_of_time, seasons_of_year};
 use super::cached::CachedJob;
 use super::chart::{self, Chart, Marker};
 use super::format;
+use super::{DAY_MARGIN, coverage, year_coverage};
 use super::{
     EphKey, app_year, busy, ephemeris, error_line, set_app_time, time_link, year_bounds,
     year_picker,
 };
 use crate::tabs::TabContext;
+use crate::widgets::coverage::coverage_notice;
 
 const SEASON_NAMES: [&str; 4] = [
     "March equinox",
@@ -72,8 +74,13 @@ pub struct SeasonsView {
 }
 
 impl SeasonsView {
+    fn coverage(&self, tc: &TabContext<'_>) -> Option<String> {
+        let year = self.year.unwrap_or(app_year(tc.settings));
+        year_coverage(tc.settings, year, DAY_MARGIN)
+    }
+
     pub fn poll(&mut self, ctx: &egui::Context, tc: &mut TabContext<'_>, visible: bool) {
-        if visible {
+        if visible && self.coverage(tc).is_none() {
             let req = Request {
                 year: self.year.unwrap_or(app_year(tc.settings)),
                 tz: tc.settings.time.tz_offset_hours,
@@ -95,12 +102,20 @@ impl SeasonsView {
             year_picker(ui, &mut self.year, app_year(tc.settings));
             ui.separator();
             let now = tc.settings.instant();
-            ui.label(format!(
-                "Equation of time at the app time: {}",
-                format::signed_minutes(equation_of_time(eph.as_ref(), now.jd_tt()) * MIN_PER_RAD)
-            ))
-            .on_hover_text("Apparent minus mean solar time");
+            if coverage(tc.settings, now.jd_ut, now.jd_ut, 1.0, 1.0).is_none() {
+                ui.label(format!(
+                    "Equation of time at the app time: {}",
+                    format::signed_minutes(
+                        equation_of_time(eph.as_ref(), now.jd_tt()) * MIN_PER_RAD
+                    )
+                ))
+                .on_hover_text("Apparent minus mean solar time");
+            }
         });
+        if let Some(problem) = self.coverage(tc) {
+            coverage_notice(ui, &problem);
+            return;
+        }
         error_line(ui, &self.job.error);
         busy(ui, self.job.is_running());
         let Some(ys) = self.job.get() else {

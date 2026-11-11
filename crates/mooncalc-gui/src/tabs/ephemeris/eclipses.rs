@@ -17,7 +17,9 @@ use mooncalc_core::{Ephemeris, GeoLocation, Instant};
 use super::cached::CachedJob;
 use super::format;
 use super::{EphKey, app_year, busy, ephemeris, error_line, set_app_time, time_link};
+use super::{LUNATION_MARGIN, coverage, year_bounds};
 use crate::tabs::TabContext;
+use crate::widgets::coverage::coverage_notice;
 
 /// The Moon at one contact of a lunar eclipse, seen from the observer.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -184,11 +186,26 @@ impl EclipsesView {
         (first, first + self.years.max(1) - 1)
     }
 
+    /// The searched years, plus the lunations around them.
+    fn coverage(&self, tc: &TabContext<'_>) -> Option<String> {
+        let (first, last) = self.range(tc);
+        let tz = tc.settings.time.tz_offset_hours;
+        let (start, _) = year_bounds(first, tz);
+        let (_, end) = year_bounds(last, tz);
+        coverage(
+            tc.settings,
+            start.jd_ut,
+            end.jd_ut,
+            LUNATION_MARGIN,
+            LUNATION_MARGIN,
+        )
+    }
+
     pub fn poll(&mut self, ctx: &egui::Context, tc: &mut TabContext<'_>, visible: bool) {
         if self.years == 0 {
             self.years = 3;
         }
-        if visible {
+        if visible && self.coverage(tc).is_none() {
             let (first, last) = self.range(tc);
             let l = &tc.settings.location;
             let req = Request {
@@ -255,6 +272,10 @@ impl EclipsesView {
                 }
             }
         });
+        if let Some(problem) = self.coverage(tc) {
+            coverage_notice(ui, &problem);
+            return;
+        }
         error_line(ui, &self.job.error);
         busy(ui, self.job.is_running());
         let Some(items) = self.job.get().cloned() else {

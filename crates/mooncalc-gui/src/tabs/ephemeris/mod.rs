@@ -45,6 +45,37 @@ pub(crate) fn ephemeris(settings: &Settings) -> Arc<dyn Ephemeris> {
     crate::backend::resolve(settings.backend, &settings.de440_path).eph
 }
 
+/// Look-back and look-ahead, days, of views that find the previous or next
+/// new Moon or another monthly event (the Moon's age, lunations, apsides,
+/// eclipses): a lunation and a day.
+pub(crate) const LUNATION_MARGIN: f64 = 31.0;
+
+/// Margin, days, of views that only interpolate or search within a day or
+/// two of their span (rise/set, seasons).
+pub(crate) const DAY_MARGIN: f64 = 2.0;
+
+/// The coverage problem of the shared ephemeris for the UT span
+/// `[start, end]` with the given look-back and look-ahead, days (see
+/// [`crate::backend::ActiveEphemeris::span_problem`]). A view shows it
+/// instead of computing.
+pub(crate) fn coverage(
+    settings: &Settings,
+    start: f64,
+    end: f64,
+    before: f64,
+    after: f64,
+) -> Option<String> {
+    crate::backend::resolve(settings.backend, &settings.de440_path)
+        .span_problem(start, end, before, after)
+}
+
+/// The coverage problem for calendar year `year` (app time zone) with
+/// `margin` days either side.
+pub(crate) fn year_coverage(settings: &Settings, year: i32, margin: f64) -> Option<String> {
+    let (a, b) = year_bounds(year, settings.time.tz_offset_hours);
+    coverage(settings, a.jd_ut, b.jd_ut, margin, margin)
+}
+
 /// Identity of the ephemeris backend, part of every job request.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct EphKey {

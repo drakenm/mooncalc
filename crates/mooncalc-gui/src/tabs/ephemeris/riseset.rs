@@ -17,10 +17,12 @@ use mooncalc_core::{GeoLocation, Instant};
 use super::cached::CachedJob;
 #[cfg(test)]
 use super::format;
+use super::{DAY_MARGIN, coverage};
 use super::{EphKey, busy, ephemeris, error_line, set_app_time, time_cell};
 use crate::datetime::{DateTimeFields, days_in_month};
 use crate::jobs::JobError;
 use crate::tabs::TabContext;
+use crate::widgets::coverage::coverage_notice;
 
 const MONTHS: [&str; 12] = [
     "January",
@@ -134,8 +136,23 @@ impl RiseSetView {
         })
     }
 
+    /// The month's days, with the interpolation table's day either side.
+    fn coverage(&self, tc: &TabContext<'_>) -> Option<String> {
+        let (year, month) = self.year_month(tc);
+        let tz = tc.settings.time.tz_offset_hours;
+        let (start, _) = CalendarDate::new(year, month, 1).local_day(tz);
+        let days = f64::from(days_in_month(year, month));
+        coverage(
+            tc.settings,
+            start.jd_ut,
+            start.jd_ut + days,
+            DAY_MARGIN,
+            DAY_MARGIN,
+        )
+    }
+
     pub fn poll(&mut self, ctx: &egui::Context, tc: &mut TabContext<'_>, visible: bool) {
-        if visible {
+        if visible && self.coverage(tc).is_none() {
             let (year, month) = self.year_month(tc);
             let l = &tc.settings.location;
             let req = Request {
@@ -222,6 +239,10 @@ impl RiseSetView {
              includes refraction. Twilight: Sun's centre at −6° (civil), −12° (nautical), \
              −18° (astronomical).",
         );
+        if let Some(problem) = self.coverage(tc) {
+            coverage_notice(ui, &problem);
+            return;
+        }
         error_line(ui, &self.job.error);
         busy(ui, self.job.is_running());
         let Some((req, rows)) = self.job.value.as_ref() else {
