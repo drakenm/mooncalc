@@ -30,6 +30,7 @@ pub mod angle;
 pub mod apsides;
 pub mod coords;
 pub mod deltat;
+pub mod eclipses;
 pub mod ephemeris;
 pub mod illumination;
 pub mod libration;
