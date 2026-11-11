@@ -448,16 +448,37 @@ fn backend_input(ui: &mut egui::Ui, settings: &mut Settings) {
     }
     if settings.backend.effective() == BackendChoice::De440 {
         ui.label("DE440 / DE440s file (.bsp):");
+        ui.horizontal(|ui| {
+            if ui.button("Browse…").clicked()
+                && let Some(p) = crate::export::ask_bsp_path(&settings.de440_path)
+            {
+                settings.de440_path = p.display().to_string();
+            }
+            if ui
+                .button("Reload")
+                .on_hover_text("Reopen the file (after replacing it)")
+                .clicked()
+            {
+                backend::reload();
+            }
+        });
         ui.add(
             egui::TextEdit::singleline(&mut settings.de440_path)
                 .hint_text("C:\\path\\to\\de440s.bsp")
                 .desired_width(f32::INFINITY),
         );
-        match backend::de440_path_problem(&settings.de440_path) {
-            Some(problem) => ui.colored_label(ui.visuals().warn_fg_color, problem),
-            None => ui.weak("File found."),
-        };
     }
+    // The ephemeris actually in use, its coverage, and any fallback.
+    let active = backend::resolve(settings.backend, &settings.de440_path);
+    match &active.notice {
+        Some(notice) => {
+            ui.colored_label(ui.visuals().warn_fg_color, notice);
+        }
+        None => {
+            ui.weak(format!("In use: {}", active.eph.name()));
+        }
+    }
+    ui.weak(format!("Coverage: {}", active.coverage_text()));
 }
 
 #[cfg(test)]

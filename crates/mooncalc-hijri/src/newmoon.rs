@@ -12,7 +12,9 @@
 //!   "The Umm al-Qura Calendar of Saudi Arabia"). The real rule tests the
 //!   29th day of the running month; here it is applied on the local day of
 //!   conjunction, which is the same day except in rare edge cases. Use the
-//!   [`UMM_AL_QURA`](crate::UMM_AL_QURA) table for the official calendar.
+//!   [`UMM_AL_QURA`](crate::UMM_AL_QURA) table for the official calendar,
+//!   or a [`TwentyNinthDayProvider`](crate::chained::TwentyNinthDayProvider)
+//!   for the strict rule (`mooncalc_visibility::calendar::UmmAlQuraRule`).
 //! * [`ConjunctionBeforeLocalTime`]: conjunction before a fixed local clock
 //!   time, e.g. before 12:00 UT, or before midnight at a meridian.
 //!
@@ -165,16 +167,25 @@ where
     }
 }
 
-/// Mean new moon nearest to `jd`, from the mean-phase formula of Meeus,
-/// *Astronomical Algorithms* (2nd ed.), eq. 49.1, without the periodic
-/// terms. It is in error by up to about 14 hours and is meant only for tests
+/// Mean synodic month, days (Meeus, *Astronomical Algorithms*, 2nd ed., ch. 49).
+pub const SYNODIC_MONTH: f64 = 29.530_588_861;
+
+/// Mean new moon (JDE) of lunation `k`, counted from the new moon of
+/// 2000 January 6 (`k = 0`): Meeus, *Astronomical Algorithms* (2nd ed.),
+/// eq. 49.1, without the periodic terms. It is in error by up to about 14
+/// hours: good for numbering lunations and as a first guess, not for
+/// calendars, which need an ephemeris.
+pub fn mean_new_moon(k: i64) -> f64 {
+    let k = k as f64;
+    let t = k / 1236.85;
+    2_451_550.097_66 + SYNODIC_MONTH * k + 0.000_154_37 * t * t - 0.000_000_150 * t * t * t
+        + 0.000_000_000_73 * t * t * t * t
+}
+
+/// Mean new moon nearest to `jd` ([`mean_new_moon`]). Meant only for tests
 /// and rough estimates; real calendars need an ephemeris.
 pub fn mean_new_moon_near(jd: f64) -> f64 {
-    const SYNODIC: f64 = 29.530_588_861;
-    let k = ((jd - 2_451_550.097_66) / SYNODIC).round();
-    let t = k / 1236.85;
-    2_451_550.097_66 + SYNODIC * k + 0.000_154_37 * t * t - 0.000_000_150 * t * t * t
-        + 0.000_000_000_73 * t * t * t * t
+    mean_new_moon(((jd - 2_451_550.097_66) / SYNODIC_MONTH).round() as i64)
 }
 
 #[cfg(test)]

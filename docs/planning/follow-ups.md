@@ -15,7 +15,11 @@ GitHub issues can't be filed from this environment yet: the `gh` CLI is authenti
 | atlas | Time-zone offsets are fixed 2026 values; historical dates need real tz rules. | atlas |
 | maps | SVG zones are staircase rects; contour tracing would make them smooth. | maps-render |
 | maps | Tiny coastline dot on the opposite edge at the antimeridian; raster globe limb antialiasing. | maps-render |
-| hijri | Strict Umm al-Qura rule that tests the 29th day of the running month; KACST revisions to the 1451–1500 projections. | hijri |
+| hijri | KACST revisions to the 1451–1500 projections. (The strict 29th-day Umm al-Qura rule is now `mooncalc_visibility::calendar::UmmAlQuraRule`.) | hijri |
+| hijri | The computed Umm al-Qura rule applies the 1423 AH rule before 1420 AH. The 1392–1419 conjunction-time rule and the earlier rules van Gent describes are not implemented. | hijri visibility |
+| hijri | Regional visibility calendars use lat/lon boxes that include sea. A land mask (e.g. the maps basemap, passed in as points) would keep ocean-only sightings out. | hijri visibility |
+
+| gui | Sky/Trajectory tab view options aren't persisted, and their scenes compute on the UI thread (slow with DE440). No planets or constellation lines in the star chart. | sky + trajectory |
 | core | ΔT beyond 2026.75 is an extrapolation; refresh the observed table from IERS periodically. | core validation |
 | gui | Arabic month names need a bundled Arabic font plus text shaping in egui. | gui calendar |
 | tauri | The mock backend duplicates the Rust stubs, and the fallback legend colours may differ from the criteria colours. Both resolve when `mooncalc-app` lands. | tauri-shell |
@@ -23,5 +27,7 @@ GitHub issues can't be filed from this environment yet: the `gh` CLI is authenti
 | core | Two missing marginal penumbral lunar eclipses (2027-07-18, 2096-06-06, \|γ\| ≈ 1.575) are beyond the Meeus ch. 54 limits. | lunar events |
 | visibility | `MoonAlwaysUp` cells aren't evaluated with Yallop's best time; the earliest-sighting scan is evening-only. | circumstances |
 | fixtures | Eclipse tests use `include_str!` paths into the workspace `tests/fixtures/`, which breaks standalone packaging of `mooncalc-core`. | lunar events |
+| gui | Map: the zone F / no-crescent boundary is staircased (field masked by `None` cells); globe render is single-threaded (~190 ms at 1600 px); zoom re-renders at up to 3× and then blurs (no cropped viewport). | gui map + report |
+| gui | Earliest sighting reports "this zone or better", so zones often share a place/date; it's evening-only. The report uses no horizon dip for elevation. | gui map + report |
 | fixtures | Odeh Table VI is missing 159 naked-eye rows (V > 8.18). ICOP records weren't extractable. | validation |
 | licensing | Confirm that committing the Yallop (Crown copyright) and Odeh (Springer) tables as test data is acceptable before the repository goes public. | validation |

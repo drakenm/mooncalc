@@ -16,9 +16,9 @@
 //! Times are shown in the app time zone (`Settings::time.tz_offset_hours`).
 //! Clicking an event time sets the app date/time to it.
 
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 
-use mooncalc_core::{Ephemeris, Instant, MeeusEphemeris};
+use mooncalc_core::{Ephemeris, Instant};
 use serde::{Deserialize, Serialize};
 
 use crate::backend::BackendChoice;
@@ -37,16 +37,12 @@ pub mod riseset;
 pub mod seasons;
 pub mod table;
 
-/// **Extension point.** The ephemeris used by the Ephemeris and Moon tabs.
-///
-/// Currently always the built-in Meeus/ELP backend (created once). Point
-/// this at the shared backend (`crate::backend`) once it provides one; the
-/// requests already include [`EphKey`], so a backend change recomputes.
-pub(crate) fn ephemeris(_settings: &Settings) -> Arc<dyn Ephemeris> {
-    static MEEUS: OnceLock<Arc<dyn Ephemeris>> = OnceLock::new();
-    MEEUS
-        .get_or_init(|| Arc::new(MeeusEphemeris::new()))
-        .clone()
+/// The ephemeris used by the Ephemeris and Moon tabs: the shared backend
+/// ([`crate::backend::resolve`], cached, falling back to Meeus when DE440
+/// is unavailable). Job requests include [`EphKey`], so changing the
+/// backend recomputes.
+pub(crate) fn ephemeris(settings: &Settings) -> Arc<dyn Ephemeris> {
+    crate::backend::resolve(settings.backend, &settings.de440_path).eph
 }
 
 /// Identity of the ephemeris backend, part of every job request.

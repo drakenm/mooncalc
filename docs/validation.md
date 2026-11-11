@@ -188,6 +188,30 @@ Excluding the 2030 epoch, the Sun's airless alt/az residuals are ≤ 0.7″. The
 - **Topocentric time scale:** convert Horizons' UTC `jd_ut` to TT with the leap-second table (TT = UTC + 32.184 s + (TAI − UTC)), then to UT1 with the core's ΔT, the same path an application uses. With the core's ΔT, UT1 − UTC comes out at +0.38 s (2000), −0.67 s (2015) and within ±0.06 s (2024–2025), against IERS values of +0.355 s, −0.67 s and ≈ 0 s.
 - **ΔT before 1800:** the USNO historic series is an older reconstruction that runs up to 14 s above Meeus Table 10.A and Morrison & Stephenson (2004) around 1680–1720 (1700: USNO 21 s, NASA 9 ± 5 s, core 7 s). The suggested max(3 s, error) fails for 82 of the 146 rows before 1730, while every row is within 2.2 × its stated error. The test uses max(3 s, 2.5 × error) for 1657–1800 and the suggested limit from 1800.
 
+## Results: Hijri calendars computed with the Meeus backend
+
+From `crates/mooncalc-visibility/tests/hijri_calendars.rs`; run `cargo test -p mooncalc-visibility --test hijri_calendars -- --nocapture` to print the reports. The month table compared against is the official Umm al-Qura calendar embedded in `mooncalc-hijri` (`UMM_AL_QURA`).
+
+- **Umm al-Qura rule vs the official table, 1420–1447 AH:** 334 of 336 months agree. The rule follows van Gent's "Rules" page: on the 29th day at the Kaʿba, moonset after sunset (1420–1422 AH), and from 1423 AH also the geocentric conjunction before sunset. Standard horizon (upper limb, 34′ refraction, no dip). Both mismatches are knife-edge cases:
+  - 1427/06 (rule 26 June 2006, table 27 June): conjunction at 16:05:14 UT, computed sunset 16:06:22 UT, 67 s later. The official computation evidently put the conjunction after sunset.
+  - 1446/06 (rule 3 December 2024, table 2 December): the Moon sets 3 s before the Sun (lag −0.05 min) at a standard horizon. With the dip for 300 m of elevation the lag becomes +0.16 min and the rule matches the table.
+  The test allows up to 6 such ±1-day cases, so a backend change that moves a borderline event by seconds does not fail it.
+- **Conjunction rules vs the table, same months:** conjunction before sunset at Mecca (on the conjunction's Saudi civil day) 294/336; conjunction before 12:00 UT (FCNA/ISNA) 300/336. Every year is 354 or 355 days.
+- **Visibility at Mecca vs the Saudi announcements, 119 announced month starts of 1422–1448 AH** (difference = computed − announced):
+
+  | Calendar | Agree | −1 d | +1 d | +2 d |
+  | --- | --- | --- | --- | --- |
+  | Umm al-Qura table | 97 (81.5%) | 12 | 10 | 0 |
+  | Yallop zone A | 19 (16.0%) | 0 | 90 | 10 |
+  | Yallop ≤ B (naked eye) | 31 (26.1%) | 0 | 84 | 4 |
+  | Yallop ≤ C | 40 (33.6%) | 0 | 76 | 3 |
+  | Yallop ≤ D (optical aid) | 46 (38.7%) | 0 | 71 | 2 |
+  | Odeh ≤ C (optical aid) | 63 (52.9%) | 1 | 55 | 0 |
+
+  The announcements are almost always on or before the date a criterion allows at Mecca: Saudi Arabia accepts sighting reports from across the country, often of crescents the criteria rate as impossible (van Gent notes moonset before sunset in several cases). Agreement is reported, not asserted, apart from a floor of 30% for the best threshold and no month more than 2 days off.
+- **Contract and numbering:** every computed calendar keeps 29- and 30-day months (`ObservedCalendar` would report `None` otherwise). The lunation numbering puts every Umm al-Qura month (1343–1500 AH) 0.5 to 3 days after its mean new moon, and every tabular month of 1–3000 AH within −1.5 to +3.5 days (`mooncalc-hijri` `chained` tests).
+- **Regions (Yallop ≤ B, 10° grid, 1446 AH):** the world-wide calendar matches Umm al-Qura in 11 of 12 months and is a day later in Ṣafar. The regions are up to a day later than the world. Four regional calendars for one year take 0.4 s in a debug build.
+
 ## Gaps
 
 - **Odeh Table VI:** the 159 records with V > 8.18 are absent from the available PDF.

@@ -14,6 +14,10 @@
 //!
 //! The widget knows nothing about visibility: the map tab renders the grid to
 //! pixels and passes them in with [`MapView::set_image`].
+//!
+//! With [`MapView::rotate_on_drag`] set (the globe view), dragging the
+//! unzoomed map does not pan: the drag is reported in
+//! [`MapResponse::drag`] so the caller can rotate the projection.
 
 use egui::{Color32, Pos2, Rect, Sense, Stroke, TextureHandle, TextureOptions, Vec2};
 
@@ -53,6 +57,14 @@ pub struct MapResponse {
     pub hover: Option<(f64, f64)>,
     /// Geographic position clicked (not dragged) this frame.
     pub clicked: Option<(f64, f64)>,
+    /// With [`MapView::rotate_on_drag`]: this frame's drag, as a fraction of
+    /// the displayed image size (x right, y down).
+    pub drag: Option<Vec2>,
+    /// A drag is in progress.
+    pub dragging: bool,
+    /// Size of the displayed (fitted, unzoomed) image in physical pixels,
+    /// so the caller can render at matching resolution.
+    pub fitted_px: Vec2,
 }
 
 /// Zoom and pan state, independent of egui so it can be unit-tested.
@@ -132,6 +144,10 @@ pub struct MapView {
     transform: ViewTransform,
     /// Last clicked position in normalised coordinates (marker fallback).
     clicked_norm: Option<(f32, f32)>,
+    /// Report drags of the unzoomed map instead of panning (globe rotation).
+    pub rotate_on_drag: bool,
+    /// The fitted rect of the last [`Self::show`].
+    last_fitted: Option<Rect>,
 }
 
 impl MapView {
@@ -144,6 +160,8 @@ impl MapView {
             aspect: 2.0,
             transform: ViewTransform::default(),
             clicked_norm: None,
+            rotate_on_drag: false,
+            last_fitted: None,
         }
     }
 
@@ -165,6 +183,13 @@ impl MapView {
         self.transform
     }
 
+    /// Screen position of a normalised image position, as laid out in the
+    /// last frame (`None` before the first [`Self::show`]).
+    pub fn screen_pos(&self, x_norm: f32, y_norm: f32) -> Option<Pos2> {
+        self.last_fitted
+            .map(|f| self.transform.norm_to_screen(f, x_norm, y_norm))
+    }
+
     /// Draw the map in all available space and handle input.
     ///
     /// `marker` is the observer position to mark (needs `forward`, otherwise
@@ -181,6 +206,7 @@ impl MapView {
         let size = ui.available_size().max(Vec2::splat(32.0));
         let (area, response) = ui.allocate_exact_size(size, Sense::click_and_drag());
         let fitted = ViewTransform::fit(area, self.aspect);
+        self.last_fitted = Some(fitted);
         let mut out = MapResponse::default();
 
         // Zoom (wheel / pinch) about the cursor.
@@ -191,9 +217,19 @@ impl MapView {
                 self.transform.zoom_about(fitted, pointer, factor);
             }
         }
+        out.dragging = response.dragged();
+        out.fitted_px = fitted.size() * ui.ctx().pixels_per_point();
         if response.dragged() {
-            self.transform.pan += response.drag_delta();
-            self.transform.clamp(fitted);
+            if self.rotate_on_drag && self.transform.zoom <= 1.0 + 1e-3 {
+                let size = self.transform.image_rect(fitted).size();
+                let d = response.drag_delta();
+                if d != Vec2::ZERO {
+                    out.drag = Some(Vec2::new(d.x / size.x, d.y / size.y));
+                }
+            } else {
+                self.transform.pan += response.drag_delta();
+                self.transform.clamp(fitted);
+            }
         }
         if response.double_clicked() {
             self.reset_view();
@@ -255,8 +291,13 @@ impl MapView {
             }
         }
 
+        let drag_hint = if self.rotate_on_drag && self.transform.zoom <= 1.0 + 1e-3 {
+            "rotate"
+        } else {
+            "pan"
+        };
         let hint = format!(
-            "Wheel: zoom ({:.1}×) · Drag: pan · Double-click: reset · Click: set location",
+            "Wheel: zoom ({:.1}×) · Drag: {drag_hint} · Double-click: reset · Click: set location",
             self.transform.zoom
         );
         let hint_pos = area.left_bottom() + Vec2::new(6.0, -6.0);

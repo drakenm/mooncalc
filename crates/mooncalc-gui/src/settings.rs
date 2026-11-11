@@ -18,6 +18,7 @@ use crate::datetime;
 use crate::tabs::Tab;
 use crate::tabs::calendar::CalendarSettings;
 use crate::tabs::ephemeris::EphemerisSettings;
+use crate::tabs::map::MapSettings;
 use crate::tabs::moon::MoonSettings;
 
 /// eframe storage key for [`Settings`].
@@ -42,6 +43,8 @@ pub struct Settings {
     pub ephemeris_tab: EphemerisSettings,
     /// Moon-tab choices (orientation, overlays, crater).
     pub moon_tab: MoonSettings,
+    /// Map-tab display options (resolution, projection, layers, export).
+    pub map: MapSettings,
 }
 
 impl Default for Settings {
@@ -57,6 +60,7 @@ impl Default for Settings {
             calendar: CalendarSettings::default(),
             ephemeris_tab: EphemerisSettings::default(),
             moon_tab: MoonSettings::default(),
+            map: MapSettings::default(),
         }
     }
 }
@@ -280,6 +284,10 @@ mod tests {
             },
             ephemeris_tab: EphemerisSettings::default(),
             moon_tab: MoonSettings::default(),
+            map: MapSettings {
+                cities: true,
+                ..MapSettings::default()
+            },
         }
     }
 
