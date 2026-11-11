@@ -4,7 +4,7 @@
 import type { CivilDate, UtDateTime } from '../backend';
 import { localDate, type Store } from '../state';
 import { h } from './dom';
-import { formatOffset, shiftHours } from './format';
+import { formatOffset, roundToMinute, shiftHours } from './format';
 
 const pad = (n: number, w = 2) => String(Math.trunc(n)).padStart(w, '0');
 
@@ -37,7 +37,7 @@ export function shortDate(d: CivilDate): string {
 
 /** A UT instant shifted into the zone, rounded to the minute. */
 export function toLocal(t: UtDateTime, tz: number): UtDateTime {
-  return shiftHours({ ...t, second: 0 }, tz + (t.second >= 30 ? 1 / 60 : 0));
+  return shiftHours(roundToMinute(t), tz);
 }
 
 /** "13:42" in the zone. */
@@ -72,8 +72,7 @@ export function zoneLabel(tz: number): string {
 
 /** Set the app's instant (UT), rounded to the minute. */
 export function setAppInstant(store: Store, t: UtDateTime): void {
-  const r = shiftHours({ ...t, second: 0 }, t.second >= 30 ? 1 / 60 : 0);
-  store.update({ instant: { ...r, second: 0 } });
+  store.update({ instant: roundToMinute(t) });
 }
 
 /** Move the app to a local civil day, keeping the local time of day. */
