@@ -221,7 +221,7 @@ fn odeh_table6_geometry_and_best_time() {
         arcl.push(g.arcl_deg - p(16));
         // Odeh's W is topocentric with the topocentric elongation,
         // W = SD′ (1 − cos ARCL′); Yallop's W′ uses the geocentric ARCL.
-        let w_odeh = g.semi_diameter_topo_arcmin * (1.0 - g.arcl_deg.to_radians().cos());
+        let w_odeh = odeh::width_arcmin(&g);
         let vv = odeh::v(g.arcv_topo_deg, w_odeh);
         w.push(w_odeh * 60.0 - p(17));
         v.push(vv - p(18));

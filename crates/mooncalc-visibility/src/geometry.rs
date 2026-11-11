@@ -35,10 +35,14 @@ pub struct CrescentGeometry {
     /// Sun's azimuth, degrees.
     pub sun_az_deg: f64,
     /// Lag: moonset − sunset (evening) or sunrise − moonrise (morning),
-    /// minutes. Negative when the Moon sets before the Sun.
+    /// minutes. Positive when the crescent is in the sky after sunset
+    /// (evening) or before sunrise (morning); negative otherwise.
     pub lag_minutes: f64,
-    /// Moon age since conjunction (geocentric), hours. Negative before
-    /// conjunction.
+    /// Evening: Moon age since conjunction (geocentric), hours, negative
+    /// before conjunction. Morning (old crescent): time remaining until
+    /// conjunction, hours, positive while the old crescent can exist. In
+    /// both cases a positive value means a crescent is possible, which is
+    /// what `criteria::crescent_present` tests.
     pub age_hours: f64,
     /// Illuminated fraction of the lunar disc, 0..1.
     pub illuminated_fraction: f64,

@@ -63,8 +63,23 @@ pub fn zone_for_v(v: f64) -> usize {
     zone_by_lower_bounds(v, &V_BOUNDS, true)
 }
 
-/// Odeh (2004). Uses [`CrescentGeometry::arcv_topo_deg`] and
-/// [`CrescentGeometry::width_topo_arcmin`] at the best time.
+/// Odeh's crescent width W in arc minutes: `SD′ (1 − cos ARCL)` with the
+/// topocentric semi-diameter and the **topocentric** elongation (Odeh 2004,
+/// §5). This differs from Yallop's W′, which uses the geocentric ARCL; near
+/// the visibility limit the difference shifts V by about 0.25.
+///
+/// Falls back to [`CrescentGeometry::width_topo_arcmin`] when no topocentric
+/// semi-diameter is set (hand-built geometries, e.g. tests on tabulated W).
+pub fn width_arcmin(g: &CrescentGeometry) -> f64 {
+    if g.semi_diameter_topo_arcmin > 0.0 {
+        g.semi_diameter_topo_arcmin * (1.0 - g.arcl_deg.to_radians().cos())
+    } else {
+        g.width_topo_arcmin
+    }
+}
+
+/// Odeh (2004). Uses [`CrescentGeometry::arcv_topo_deg`] and the width from
+/// [`width_arcmin`], at the best time.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Odeh;
 
@@ -86,7 +101,7 @@ impl Criterion for Odeh {
         &ZONES
     }
     fn evaluate(&self, g: &CrescentGeometry) -> CriterionResult {
-        let v = v(g.arcv_topo_deg, g.width_topo_arcmin);
+        let v = v(g.arcv_topo_deg, width_arcmin(g));
         CriterionResult {
             zone: zone_for_v(v),
             value: Some(v),
@@ -135,6 +150,18 @@ mod tests {
         assert_eq!(Odeh.evaluate(&geom(7.0, 0.5)).zone, 1);
         assert_eq!(Odeh.evaluate(&geom(4.0, 0.5)).zone, 2);
         assert_eq!(Odeh.evaluate(&geom(2.5, 0.5)).zone, 3);
+    }
+
+    #[test]
+    fn width_uses_topocentric_elongation() {
+        let g = CrescentGeometry {
+            arcl_deg: 12.0,
+            semi_diameter_topo_arcmin: 15.5,
+            width_topo_arcmin: 9.9, // ignored when SD′ is present
+            ..Default::default()
+        };
+        let expected = 15.5 * (1.0 - 12.0f64.to_radians().cos());
+        assert!((width_arcmin(&g) - expected).abs() < 1e-12);
     }
 
     #[test]
