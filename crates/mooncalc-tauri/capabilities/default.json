@@ -1,0 +1,13 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Least privilege for the main window: only MoonCalc's own commands. No core plugins (filesystem, shell, events, window control) are granted.",
+  "windows": ["main"],
+  "permissions": [
+    "allow-app-info",
+    "allow-criteria-list",
+    "allow-compute-visibility-map",
+    "allow-location-report",
+    "allow-search-cities"
+  ]
+}
