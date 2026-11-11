@@ -27,6 +27,7 @@
 //! default paths, so it builds for `wasm32-unknown-unknown`.
 
 pub mod angle;
+pub mod apsides;
 pub mod coords;
 pub mod deltat;
 pub mod ephemeris;
@@ -36,6 +37,8 @@ pub mod meeus;
 pub mod nutation;
 pub mod precession;
 pub mod refraction;
+pub(crate) mod search;
+pub mod seasons;
 pub mod time;
 pub mod topocentric;
 pub mod transform;
