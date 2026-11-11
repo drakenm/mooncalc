@@ -716,6 +716,7 @@ const STATUSES: [Status; compute::STATUS_COUNT] = [
     Status::MidnightSun,
     Status::PolarNight,
     Status::SunAltitudeNotReached,
+    Status::OutsideEphemeris,
 ];
 
 /// A small colour square.

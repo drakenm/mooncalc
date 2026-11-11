@@ -43,6 +43,7 @@ pub fn status_code(s: Status) -> &'static str {
         Status::MidnightSun => "midnight-sun",
         Status::PolarNight => "polar-night",
         Status::SunAltitudeNotReached => "sun-altitude-not-reached",
+        Status::OutsideEphemeris => "outside-ephemeris",
     }
 }
 
@@ -75,6 +76,7 @@ pub(crate) fn status_text(s: Status, crescent: Crescent) -> String {
         Status::MidnightSun => "The Sun does not set (midnight Sun).",
         Status::PolarNight => "The Sun does not rise (polar night).",
         Status::SunAltitudeNotReached => "The Sun does not reach the criterion's altitude.",
+        Status::OutsideEphemeris => "The date is outside the ephemeris coverage.",
     }
     .into()
 }

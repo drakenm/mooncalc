@@ -1158,6 +1158,9 @@ fn summary_line(ui: &mut egui::Ui, night: &Night, tz: f64, crescent: Crescent) {
             "{sun_word} {} · the Sun does not reach the criterion's altitude",
             hm(*sun_event)
         ),
+        Outcome::OutsideEphemeris => {
+            "Not computed: the date is outside the ephemeris coverage".to_owned()
+        }
     };
     ui.horizontal_wrapped(|ui| {
         ui.label(format!("{} — {text}", night.key.date_label()));

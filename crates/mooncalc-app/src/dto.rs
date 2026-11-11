@@ -405,6 +405,9 @@ pub struct StatusCounts {
     pub midnight_sun: u32,
     pub polar_night: u32,
     pub sun_altitude_not_reached: u32,
+    /// Cells outside the ephemeris coverage (non-finite positions).
+    #[serde(default)]
+    pub outside_ephemeris: u32,
 }
 
 /// The cell with the highest criterion value (or the first cell in the most

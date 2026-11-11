@@ -267,6 +267,7 @@ fn status_counts(status: &[Status], zones: &[Option<u8>]) -> StatusCounts {
             Status::MidnightSun => &mut s.midnight_sun,
             Status::PolarNight => &mut s.polar_night,
             Status::SunAltitudeNotReached => &mut s.sun_altitude_not_reached,
+            Status::OutsideEphemeris => &mut s.outside_ephemeris,
         };
         *slot += 1;
     }

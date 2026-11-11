@@ -32,6 +32,14 @@
 //! conjunction, both positive when there is an old crescent to see. (Yallop's
 //! Table 4 prints both negative for morning records.)
 //!
+//! **Ephemeris coverage.** An ephemeris evaluated outside its valid range
+//! (a DE440 file beyond its span) returns NaN coordinates. Before searching,
+//! [`compute_with`] checks that the Sun's and Moon's positions are finite
+//! across the window the searches use (about ±1.75 days around the request's
+//! `noon`) and that a finite conjunction lies within half a synodic month of
+//! it; otherwise it returns [`Outcome::OutsideEphemeris`] rather than a
+//! polar or "not visible" result computed from NaN.
+//!
 //! Rise and set use [`Settings::horizon`], by default the standard horizon
 //! of [`mooncalc_core::events::riseset`] (upper limb, 34′ refraction, level
 //! horizon). That is the convention of HMNAO and USNO, and reproduces
@@ -164,6 +172,11 @@ pub enum Outcome {
     /// [`EvaluationTime::SunAltitude`]: the Sun does not reach that altitude
     /// within 12 h after sunset (before sunrise).
     SunAltitudeNotReached { sun_event: Instant },
+    /// The position source gave non-finite Sun or Moon positions around the
+    /// request (the date lies outside the ephemeris coverage), or no finite
+    /// conjunction lies within half a synodic month of it. Nothing was
+    /// computed; callers should report the coverage rather than a verdict.
+    OutsideEphemeris,
 }
 
 /// A compact status code per outcome, e.g. for map cells.
@@ -178,6 +191,23 @@ pub enum Status {
     MidnightSun = 5,
     PolarNight = 6,
     SunAltitudeNotReached = 7,
+    /// [`Outcome::OutsideEphemeris`].
+    OutsideEphemeris = 8,
+}
+
+impl Status {
+    /// Every status, indexed by its discriminant.
+    pub const ALL: [Status; 9] = [
+        Status::Crescent,
+        Status::BeforeConjunction,
+        Status::MoonSetsFirst,
+        Status::MoonAlwaysUp,
+        Status::MoonAlwaysDown,
+        Status::MidnightSun,
+        Status::PolarNight,
+        Status::SunAltitudeNotReached,
+        Status::OutsideEphemeris,
+    ];
 }
 
 impl Outcome {
@@ -191,6 +221,7 @@ impl Outcome {
             Self::NoSunEvent(Polar::MidnightSun) => Status::MidnightSun,
             Self::NoSunEvent(Polar::PolarNight) => Status::PolarNight,
             Self::SunAltitudeNotReached { .. } => Status::SunAltitudeNotReached,
+            Self::OutsideEphemeris => Status::OutsideEphemeris,
         }
     }
 
@@ -244,23 +275,54 @@ pub fn compute(eph: &dyn Ephemeris, req: &Request, settings: &Settings) -> Outco
     compute_with(&table, &new_moons, req, settings)
 }
 
-/// The nearest instant in `list` to `jd_ut`.
-fn nearest(list: &[Instant], jd_ut: f64) -> Instant {
-    *list
-        .iter()
+/// The nearest finite instant in `list` to `jd_ut`, if any.
+fn nearest(list: &[Instant], jd_ut: f64) -> Option<Instant> {
+    list.iter()
+        .filter(|t| t.jd_ut.is_finite())
         .min_by(|a, b| (a.jd_ut - jd_ut).abs().total_cmp(&(b.jd_ut - jd_ut).abs()))
-        .expect("at least one new Moon")
+        .copied()
+}
+
+/// Offsets from the request's `noon`, days, at which [`compute_with`] checks
+/// that the source is finite. The Sun-event search stays within a day of the
+/// transit nearest `noon` and the Moon-event search within 0.55 d of the Sun
+/// event, so every position the searches evaluate lies inside ±1.75 d; the
+/// coverage of an ephemeris is one interval, so checking the ends (and the
+/// middle) suffices.
+const COVERAGE_PROBES: [f64; 3] = [-1.75, 0.0, 1.75];
+
+/// Whether `src` gives finite Sun and Moon positions (and sidereal time)
+/// throughout the window the searches around `noon` use.
+fn source_covers<S: PositionSource + ?Sized>(src: &S, noon: f64) -> bool {
+    COVERAGE_PROBES.iter().all(|dt| {
+        let t = noon + dt;
+        src.gast(t).is_finite()
+            && [Body::Sun, Body::Moon]
+                .iter()
+                .all(|&b| src.position(b, t).iter().all(|x| x.is_finite()))
+    })
 }
 
 /// Compute from a position source and a list of new Moons (geocentric
 /// conjunctions; the one nearest the evaluation instant gives the age).
-/// The source must cover about ±2 days around `req.noon`.
+/// The source must cover about ±2 days around `req.noon`, and the list
+/// must hold the conjunction nearest it: otherwise (non-finite positions,
+/// or no finite conjunction within half a synodic month) the result is
+/// [`Outcome::OutsideEphemeris`]. Non-finite entries in `new_moons` (phases
+/// beyond the ephemeris coverage) are ignored.
 pub fn compute_with<S: PositionSource + ?Sized>(
     src: &S,
     new_moons: &[Instant],
     req: &Request,
     settings: &Settings,
 ) -> Outcome {
+    let noon = req.noon.jd_ut;
+    // The evaluation instant lies within about two days of `noon`.
+    let conjunction_known = nearest(new_moons, noon)
+        .is_some_and(|c| (c.jd_ut - noon).abs() <= SYNODIC_MONTH_DAYS / 2.0 + 2.0);
+    if !conjunction_known || !source_covers(src, noon) {
+        return Outcome::OutsideEphemeris;
+    }
     let obs = Observer::new(&req.location);
     let sun = Searcher::with_observer(src, Body::Sun, obs, settings.horizon);
     let moon = Searcher::with_observer(src, Body::Moon, obs, settings.horizon);
@@ -312,7 +374,7 @@ pub fn compute_with<S: PositionSource + ?Sized>(
 
     let atm = &settings.atmosphere;
     let build = |te: f64, moon_event: Option<f64>, lag_minutes: f64| {
-        let conj = nearest(new_moons, te);
+        let conj = nearest(new_moons, te).expect("checked above: a finite new Moon");
         let age_hours = dir * (te - conj.jd_ut) * 24.0;
         Circumstances {
             sighting: req.sighting,
@@ -539,6 +601,129 @@ mod tests {
             }
         }
         assert!(checked > 1000, "{checked}");
+    }
+
+    /// Meeus inside `[from, to]` (TT JD), NaN coordinates outside: a DE440
+    /// file evaluated beyond its coverage.
+    struct Clipped {
+        inner: MeeusEphemeris,
+        from: f64,
+        to: f64,
+    }
+
+    impl Clipped {
+        /// Covering `days_before` to `days_after` around `t`.
+        fn around(t: Instant, days_before: f64, days_after: f64) -> Self {
+            Self {
+                inner: MeeusEphemeris::new(),
+                from: t.jd_tt() - days_before,
+                to: t.jd_tt() + days_after,
+            }
+        }
+
+        fn ok(&self, jd_tt: f64) -> bool {
+            (self.from..=self.to).contains(&jd_tt)
+        }
+    }
+
+    impl Ephemeris for Clipped {
+        fn name(&self) -> &str {
+            "clipped Meeus"
+        }
+        fn valid_range(&self) -> (f64, f64) {
+            (self.from, self.to)
+        }
+        fn sun_equatorial(&self, jd_tt: f64) -> mooncalc_core::Equatorial {
+            let e = self.inner.sun_equatorial(jd_tt);
+            if self.ok(jd_tt) { e } else { nan_eq() }
+        }
+        fn moon_equatorial(&self, jd_tt: f64) -> mooncalc_core::Equatorial {
+            let e = self.inner.moon_equatorial(jd_tt);
+            if self.ok(jd_tt) { e } else { nan_eq() }
+        }
+        fn sun_ecliptic(&self, jd_tt: f64) -> mooncalc_core::Ecliptic {
+            let e = self.inner.sun_ecliptic(jd_tt);
+            if self.ok(jd_tt) { e } else { nan_ecl() }
+        }
+        fn moon_ecliptic(&self, jd_tt: f64) -> mooncalc_core::Ecliptic {
+            let e = self.inner.moon_ecliptic(jd_tt);
+            if self.ok(jd_tt) { e } else { nan_ecl() }
+        }
+    }
+
+    fn nan_eq() -> mooncalc_core::Equatorial {
+        mooncalc_core::Equatorial {
+            ra: f64::NAN,
+            dec: f64::NAN,
+            distance_km: f64::NAN,
+        }
+    }
+
+    fn nan_ecl() -> mooncalc_core::Ecliptic {
+        mooncalc_core::Ecliptic {
+            lon: f64::NAN,
+            lat: f64::NAN,
+            distance_km: f64::NAN,
+        }
+    }
+
+    fn mecca_evening(date: CalendarDate) -> Request {
+        Request::local_date(
+            GeoLocation::new(21.4225, 39.8262, 0.0),
+            date,
+            Sighting::Evening,
+            EvaluationTime::YallopBestTime,
+        )
+    }
+
+    #[test]
+    fn outside_the_ephemeris_is_reported_not_polar() {
+        let req = mecca_evening(CalendarDate::new(2024, 3, 11));
+        let noon = req.noon;
+        // Entirely outside: coverage ended ten days earlier. Before this
+        // check the NaN positions came out as `NoSunEvent(MidnightSun)`.
+        let eph = Clipped::around(noon, 40.0, -10.0);
+        let o = compute(&eph, &req, &Settings::default());
+        assert_eq!(o, Outcome::OutsideEphemeris);
+        assert_eq!(o.status(), Status::OutsideEphemeris);
+        assert!(o.circumstances().is_none());
+        assert!(o.evaluate(&Yallop).is_none());
+        // Partly outside: the coverage ends during the evening's searches.
+        let eph = Clipped::around(noon, 40.0, 0.5);
+        assert_eq!(
+            compute(&eph, &req, &Settings::default()),
+            Outcome::OutsideEphemeris
+        );
+        let eph = Clipped::around(noon, 1.0, 40.0);
+        assert_eq!(
+            compute(&eph, &req, &Settings::default()),
+            Outcome::OutsideEphemeris
+        );
+        // Positions covered, but the nearest conjunction (2024 March 10 or
+        // April 8 around the March 25 full Moon) is not.
+        let full = mecca_evening(CalendarDate::new(2024, 3, 25));
+        let eph = Clipped::around(full.noon, 4.0, 4.0);
+        assert_eq!(
+            compute(&eph, &full, &Settings::default()),
+            Outcome::OutsideEphemeris
+        );
+    }
+
+    #[test]
+    fn inside_the_ephemeris_matches_the_unclipped_result() {
+        let req = mecca_evening(CalendarDate::new(2024, 3, 11));
+        let full = compute(&MeeusEphemeris::new(), &req, &Settings::default());
+        assert_eq!(full.status(), Status::Crescent);
+        // The conjunction (March 10) and ±2 days are covered; the outer new
+        // Moons of `new_moons_around` (February 9, April 8) are NaN.
+        let eph = Clipped::around(req.noon, 3.0, 3.0);
+        let moons = new_moons_around(&eph, req.noon);
+        assert!(moons.iter().filter(|t| t.jd_ut.is_nan()).count() == 2);
+        assert_eq!(compute(&eph, &req, &Settings::default()), full);
+        // And `Status::ALL` is indexed by the discriminant.
+        for (i, s) in Status::ALL.iter().enumerate() {
+            assert_eq!(*s as usize, i);
+        }
     }
 
     #[test]

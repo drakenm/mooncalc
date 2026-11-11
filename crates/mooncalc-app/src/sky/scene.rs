@@ -213,7 +213,7 @@ impl NightScene {
             ),
             Outcome::MoonAlwaysDown { sun_event }
             | Outcome::SunAltitudeNotReached { sun_event } => (Some(sun_event.jd_ut), None, None),
-            Outcome::NoSunEvent(_) => (None, None, None),
+            Outcome::NoSunEvent(_) | Outcome::OutsideEphemeris => (None, None, None),
             other => {
                 let c = other
                     .circumstances()

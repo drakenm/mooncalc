@@ -84,7 +84,7 @@ pub struct MapSpec {
 }
 
 /// Number of [`Status`] variants.
-pub const STATUS_COUNT: usize = 8;
+pub const STATUS_COUNT: usize = Status::ALL.len();
 
 /// Short description of a cell status without a crescent.
 pub fn status_text(s: Status, crescent: Crescent) -> &'static str {
@@ -100,6 +100,7 @@ pub fn status_text(s: Status, crescent: Crescent) -> &'static str {
         Status::MidnightSun => "Polar day (no sunset/sunrise)",
         Status::PolarNight => "Polar night (Sun stays down)",
         Status::SunAltitudeNotReached => "Sun never reaches the evaluation altitude",
+        Status::OutsideEphemeris => "Outside the ephemeris coverage",
     }
 }
 
