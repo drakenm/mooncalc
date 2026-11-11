@@ -1,6 +1,6 @@
 [package]
 name = "mooncalc-atlas"
-description = "Embedded world city atlas (GeoNames, CC BY 4.0) with search."
+description = "Embedded world city atlas (GeoNames, CC BY 4.0) with search, and IANA time zones."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -8,5 +8,7 @@ rust-version.workspace = true
 
 [dependencies]
 mooncalc-core.workspace = true
+jiff.workspace = true
+jiff-tzdb.workspace = true
 serde.workspace = true
 serde_json.workspace = true
