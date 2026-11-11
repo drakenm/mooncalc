@@ -8,6 +8,7 @@ import MIT_LICENSE from '../../../../LICENSE?raw';
 const ATTRIBUTIONS: [string, string][] = [
   ['Natural Earth', 'Coastline and country base-map data. Public domain (naturalearthdata.com).'],
   ['GeoNames', 'City atlas data, licensed under Creative Commons Attribution 4.0 (CC BY 4.0) (geonames.org).'],
+  ['IANA Time Zone Database', 'Time-zone rules (DST and historical offsets) for local times. Public domain (iana.org/time-zones); evaluated by jiff (MIT / Unlicense).'],
   ['JPL DE440', 'Planetary and lunar ephemeris, NASA Jet Propulsion Laboratory (Park et al. 2021), optional.'],
   ['Jean Meeus', 'Astronomical Algorithms, 2nd edition (Willmann-Bell, 1998): the built-in Sun and Moon theory and time scales.'],
   ['B. D. Yallop (1997)', 'A Method for Predicting the First Sighting of the New Crescent Moon, NAO Technical Note No. 69.'],

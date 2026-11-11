@@ -22,7 +22,7 @@ GeoNames updates its dumps daily, so a rebuild reproduces the format and the sel
 - Elevation is the GeoNames `elevation` field, then `dem` when that is empty. A `dem` of -9999 (no data) becomes 0.
 - Coordinates are rounded to 4 decimal places, about 11 m.
 - Alternate names are kept only for places with population of at least 50 000. Only Latin-script names starting with a capital letter are kept, excluding airport-style all-capital codes and duplicates after case and diacritic folding. Up to 12 per place are kept, shortest first, so exonyms such as Mecca, Bombay, Peking and Rangoon stay searchable.
-- Standard offset is the `timeZones.txt` raw offset. The DST offset is whichever of the January and July offsets differs from it, or equals it where DST is not observed. Both describe the snapshot year.
+- Standard offset is the `timeZones.txt` raw offset. The DST offset is whichever of the January and July offsets differs from it, or equals it where DST is not observed. Both describe the snapshot year and are only labels (search results). Local times use the city's IANA zone through `mooncalc_atlas::tz`, with the full rules from the IANA Time Zone Database (see `tools/tz/README.md`). `tz::tests::every_atlas_zone_is_known` checks that every atlas zone resolves and that its 2026 offsets match these columns.
 
 ## File format (version 1)
 
