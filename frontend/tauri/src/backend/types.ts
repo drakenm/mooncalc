@@ -3,6 +3,8 @@
 // Mirrors crates/mooncalc-app/src/dto.rs; keep the two in step. Conventions:
 // camelCase fields, unit suffixes in names (`latDeg`, `elevationM`),
 // longitude east-positive, all date-times in UT, binary payloads as base64.
+// Services that take a time zone accept an IANA `timeZone` (or the fixed
+// `tzOffsetHours`) and give each UtDateTime of the result `offsetHours`.
 
 /** Zone byte marking a map cell with no evaluation. */
 export const NO_DATA = 255;
@@ -31,6 +33,9 @@ export interface UtDateTime extends CivilDate {
   hour: number;
   minute: number;
   second: number;
+  /** Offset of local time from UT at this instant, hours, in the request's
+   * zone: set in results of zone-aware services, ignored on input. */
+  offsetHours?: number;
 }
 
 export type Crescent = 'evening' | 'morning';
@@ -215,9 +220,12 @@ export interface SavedFile {
 // --- location_report ------------------------------------------------------
 
 export interface LocationReportParams {
-  /** Local civil date in the tzOffsetHours zone. */
+  /** Local civil date in the request's zone. */
   date: CivilDate;
+  /** Fixed offset from UT, hours, used when `timeZone` is absent. */
   tzOffsetHours: number;
+  /** IANA zone whose rules give the offset on each date; wins over `tzOffsetHours`. */
+  timeZone?: string | null;
   location: Location;
   ephemerisId?: string | null;
 }
@@ -290,7 +298,12 @@ export interface CrescentReport {
 export interface LocationReport {
   location: Location;
   date: CivilDate;
+  /** The offset at local civil noon (each time carries its own `offsetHours`). */
   tzOffsetHours: number;
+  /** The IANA zone used, if any. */
+  timeZone: string | null;
+  /** The zone's abbreviation at civil noon (`BST`, `+03`, `UTC+05:30`). */
+  zoneAbbreviation: string;
   ephemeris: string;
   day: DayEvents;
   moonAgeAtNoonHours: number;
@@ -332,6 +345,39 @@ export interface City {
   stdOffsetHours: number;
   dstOffsetHours: number;
   population: number | null;
+}
+
+// --- time zones -------------------------------------------------------------
+
+export interface ZoneOffsetsParams {
+  timeZone: string;
+  /** Default 1800. */
+  fromYear?: number;
+  /** Exclusive, default 2500. */
+  toYear?: number;
+}
+
+export interface ZoneTransition {
+  unixSeconds: number;
+  /** The offset from this instant on, seconds east. */
+  offsetSeconds: number;
+  abbreviation: string;
+  dst: boolean;
+}
+
+/** A zone's offset changes over a span of years (see `src/zone.ts`). */
+export interface ZoneOffsets {
+  /** Canonical IANA name. */
+  timeZone: string;
+  tzdbVersion: string;
+  fromYear: number;
+  toYear: number;
+  fromUnixSeconds: number;
+  toUnixSeconds: number;
+  initialOffsetSeconds: number;
+  initialAbbreviation: string;
+  initialDst: boolean;
+  transitions: ZoneTransition[];
 }
 
 export interface NearestCity {

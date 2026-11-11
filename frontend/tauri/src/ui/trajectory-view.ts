@@ -13,10 +13,11 @@
 import './sky.css';
 
 import { BackendError, type Backend, type BodyDayEvents, type TrackSample, type TrajectoryDay, type TrajectoryParams, type UtDateTime } from '../backend';
-import { changed, localDate, type Store } from '../state';
+import { changed, localDate, type Store, zoneParams } from '../state';
 import { debounce, h, replaceChildren } from './dom';
 import { formatDate } from './format';
-import { DEG, MOON_COLOR, SUN_COLOR, Series, Stage, TimeSlider, compassPoint, cssVar, dateHm, drawMoon, hm, label, phaseName, rotateCcw, utMs, zoneLabel } from './sky-common';
+import { DEG, MOON_COLOR, SUN_COLOR, Series, Stage, TimeSlider, compassPoint, cssVar, dateHm, drawMoon, hm, label, localHm, phaseName, rotateCcw, utMs, zoneLabel } from './sky-common';
+import { dateMs, localToUtMs, tzOf } from '../zone';
 
 type Row = [string, string | Node];
 
@@ -60,7 +61,12 @@ export class TrajectoryView {
     this.compass = new Stage(this.compassEl, (ctx, w, hh) => this.drawCompass(ctx, w, hh));
     this.slider = new TimeSlider(
       (m) => this.setMinute(m),
-      (m) => (this.day ? `${hm(utMs(this.day.dayStart) + m * 60_000, this.day.tzOffsetHours)} ${zoneLabel(this.day.tzOffsetHours)}` : ''),
+      (m) => {
+        if (!this.day) return '';
+        const ms = utMs(this.day.dayStart) + m * 60_000;
+        const tz = tzOf(this.store.get());
+        return `${hm(ms, tz)} ${zoneLabel(tz, ms)}`;
+      },
       90,
     );
     this.el.append(
@@ -75,7 +81,7 @@ export class TrajectoryView {
 
     const refresh = debounce(() => void this.refresh(), 150);
     this.store.subscribe((s, prev) => {
-      if (changed(s, prev, ['instant', 'tzOffsetHours', 'location', 'ephemerisId'])) {
+      if (changed(s, prev, ['instant', 'tzOffsetHours', 'timeZone', 'location', 'ephemerisId'])) {
         this.stale = true;
         if (this.active) refresh();
       }
@@ -99,15 +105,15 @@ export class TrajectoryView {
   private seek(e: PointerEvent): void {
     const r = this.plot.canvas.getBoundingClientRect();
     const b = this.plotBox(r.width, r.height);
-    const m = ((e.clientX - r.left - b.x0) / (b.x1 - b.x0)) * 1440;
-    if (m < 0 || m > 1440) return;
-    this.slider.setRange(0, 1440, m);
+    const m = ((e.clientX - r.left - b.x0) / (b.x1 - b.x0)) * this.dayMinutes();
+    if (m < 0 || m > this.dayMinutes()) return;
+    this.slider.setRange(0, this.dayMinutes(), m);
     this.setMinute(Math.round(m));
   }
 
   private params(): TrajectoryParams {
     const s = this.store.get();
-    return { date: localDate(s), tzOffsetHours: s.tzOffsetHours, location: s.location, ephemerisId: s.ephemerisId };
+    return { date: localDate(s), ...zoneParams(s, localDate(s)), location: s.location, ephemerisId: s.ephemerisId };
   }
 
   private async refresh(): Promise<void> {
@@ -117,8 +123,8 @@ export class TrajectoryView {
     const s = this.store.get();
     if (key === this.lastParams && this.day) {
       // Same day: follow the app time.
-      this.minute = Math.max(0, Math.min(1440, (utMs(s.instant) - utMs(this.day.dayStart)) / 60_000));
-      this.slider.setRange(0, 1440, this.minute);
+      this.minute = Math.max(0, Math.min(this.dayMinutes(), (utMs(s.instant) - utMs(this.day.dayStart)) / 60_000));
+      this.slider.setRange(0, this.dayMinutes(), this.minute);
       this.update();
       return;
     }
@@ -130,8 +136,8 @@ export class TrajectoryView {
       this.lastParams = key;
       this.day = day;
       this.series = new Series(utMs(day.dayStart), day.stepMinutes * 60_000, day.samples);
-      this.minute = Math.max(0, Math.min(1440, (utMs(this.store.get().instant) - utMs(day.dayStart)) / 60_000));
-      this.slider.setRange(0, 1440, this.minute);
+      this.minute = Math.max(0, Math.min(this.dayMinutes(), (utMs(this.store.get().instant) - utMs(day.dayStart)) / 60_000));
+      this.slider.setRange(0, this.dayMinutes(), this.minute);
       this.status.textContent = day.ephemeris;
       this.update();
     } catch (err) {
@@ -151,6 +157,12 @@ export class TrajectoryView {
     this.compass.redraw();
   }
 
+  /** Length of the local day, minutes: 1380 or 1500 when the clocks change. */
+  private dayMinutes(): number {
+    const d = this.day;
+    return d?.dayEnd ? (utMs(d.dayEnd) - utMs(d.dayStart)) / 60_000 : 1440;
+  }
+
   private nowMs(): number {
     return utMs(this.day!.dayStart) + this.minute * 60_000;
   }
@@ -160,11 +172,11 @@ export class TrajectoryView {
   private renderReadouts(): void {
     const d = this.day;
     if (!d || !this.series) return;
-    const tz = d.tzOffsetHours;
+    const tz = tzOf(this.store.get());
     const now = this.nowMs();
     const s = this.series.at(now);
-    replaceChildren(this.title, h('strong', {}, `${formatDate(d.date)}`), ` · local day (${zoneLabel(tz)})`);
-    const t = (x: UtDateTime | null) => (x ? hm(utMs(x), tz) : '—');
+    replaceChildren(this.title, h('strong', {}, `${formatDate(d.date)}`), ` · local day (${tz.name ?? zoneLabel(tz, now)})`);
+    const t = (x: UtDateTime | null) => localHm(x, tz);
     const ev = (e: BodyDayEvents) => {
       if (e.circumpolar) return e.circumpolar === 'always-up' ? 'Up all day' : 'Down all day';
       const az = (v: number | null) => (v === null ? '' : ` (${v.toFixed(0)}° ${compassPoint(v)})`);
@@ -180,7 +192,7 @@ export class TrajectoryView {
     replaceChildren(
       this.readouts,
       kv([
-        ['Time', `${dateHm(now, tz)} ${zoneLabel(tz)}`],
+        ['Time', `${dateHm(now, tz)} ${zoneLabel(tz, now)}`],
         ['Sun', pos(s.sunAltDeg, s.sunAzDeg)],
         ['Moon', pos(s.moonAltDeg, s.moonAzDeg)],
         ['Sun events', ev(d.sun)],
@@ -210,18 +222,19 @@ export class TrajectoryView {
       label(ctx, 'Computing the day…', w / 2, hh / 2, text, 'center');
       return;
     }
-    const x = (m: number) => b.x0 + (m / 1440) * (b.x1 - b.x0);
+    const len = this.dayMinutes();
+    const x = (m: number) => b.x0 + (m / len) * (b.x1 - b.x0);
     const y = (alt: number) => b.y0 + ((90 - alt) / 180) * (b.y1 - b.y0);
     const start = utMs(d.dayStart);
-    const tz = d.tzOffsetHours;
+    const tz = tzOf(this.store.get());
     // Twilight bands.
     const cols = Math.max(48, Math.round((b.x1 - b.x0) / 3));
     for (let i = 0; i < cols; i++) {
-      const m = ((i + 0.5) / cols) * 1440;
+      const m = ((i + 0.5) / cols) * len;
       ctx.fillStyle = bandColor(series.at(start + m * 60_000).sunAltDeg);
       // Whole-pixel columns, so neighbouring bands do not leave seams.
-      const xa = Math.round(x((i / cols) * 1440));
-      const xb = Math.round(x(((i + 1) / cols) * 1440));
+      const xa = Math.round(x((i / cols) * len));
+      const xb = Math.round(x(((i + 1) / cols) * len));
       ctx.fillRect(xa, b.y0, xb - xa, b.y1 - b.y0);
     }
     // Grid.
@@ -234,12 +247,16 @@ export class TrajectoryView {
       ctx.stroke();
       label(ctx, `${alt}°`, b.x0 - 6, y(alt), muted, 'right', 'middle', 10);
     }
+    // Local clock hours (on a day when the clocks change, a skipped hour
+    // falls on the next one).
+    const midnight = dateMs(d.date);
     for (let hr = 0; hr <= 24; hr += 2) {
+      const m = Math.min(len, (localToUtMs(tz, midnight + hr * 3_600_000) - start) / 60_000);
       ctx.beginPath();
-      ctx.moveTo(x(hr * 60), b.y0);
-      ctx.lineTo(x(hr * 60), b.y1);
+      ctx.moveTo(x(m), b.y0);
+      ctx.lineTo(x(m), b.y1);
       ctx.stroke();
-      label(ctx, `${String(hr % 24).padStart(2, '0')}:00`, x(hr * 60), b.y1 + 14, muted, 'center', 'middle', 10);
+      label(ctx, `${String(hr % 24).padStart(2, '0')}:00`, x(m), b.y1 + 14, muted, 'center', 'middle', 10);
     }
     ctx.strokeStyle = 'rgb(140 170 120)';
     ctx.lineWidth = 1.4;
@@ -273,7 +290,7 @@ export class TrajectoryView {
       ctx.arc(x(m), y(alt), 3.5, 0, 2 * Math.PI);
       ctx.fillStyle = color;
       ctx.fill();
-      label(ctx, `${text} ${hm(utMs(t), tz)}`, x(m), y(alt) + (above ? -11 : 12), color, 'center', 'middle', 10);
+      label(ctx, `${text} ${localHm(t, tz)}`, x(m), y(alt) + (above ? -11 : 12), color, 'center', 'middle', 10);
     };
     mark(d.sun.rise, SUN_COLOR, '☀↑', true);
     mark(d.sun.set, SUN_COLOR, '☀↓', true);

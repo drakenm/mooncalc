@@ -4,6 +4,7 @@ import './styles.css';
 
 import { BackendError, createBackend } from './backend';
 import { Store } from './state';
+import { ensureZone } from './zone';
 import { createApp } from './ui/app';
 import { h } from './ui/dom';
 
@@ -28,6 +29,18 @@ async function main(): Promise<void> {
         info = await backend.appInfo();
       } catch (err) {
         console.warn('DE440 file could not be reloaded', err);
+      }
+    }
+    // Load the saved IANA zone's rules before any view formats a time; an
+    // unknown zone falls back to the fixed offset.
+    const zone = store.get().timeZone;
+    if (zone) {
+      try {
+        const z = await ensureZone(zone, (n) => backend.timeZoneOffsets({ timeZone: n }));
+        if (z.name !== zone) store.update({ timeZone: z.name });
+      } catch (err) {
+        console.warn('Time zone could not be loaded', err);
+        store.update({ timeZone: null });
       }
     }
     if (!info.ephemerisBackends.some((b) => b.id === store.get().ephemerisId && b.available && b.ready)) {

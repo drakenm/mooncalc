@@ -2,7 +2,8 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { formatUtDateTime, roundToMinute } from '../src/ui/format.ts';
+import { formatOffset, formatUtDateTime, roundToMinute } from '../src/ui/format.ts';
+import { fixedTz, formatOffset as zoneFormatOffset } from '../src/zone.ts';
 
 const t = (year: number, month: number, day: number, hour: number, minute: number, second: number) => ({
   year,
@@ -32,9 +33,13 @@ test('rounding carries into the hour, day, month and year', () => {
 
 test('the local time follows the rounded UT time', () => {
   // 23:59:40 UT rounds to 00:00 UT the next day; UT+3 is 03:00.
-  assert.equal(formatUtDateTime(t(2024, 3, 10, 23, 59, 40), 3), '2024-03-11 00:00 UT (03:00 UT+3)');
-  assert.equal(formatUtDateTime(t(2024, 3, 10, 18, 42, 30), -5.5), '2024-03-10 18:43 UT (13:13 UT−5:30)');
-  assert.equal(formatUtDateTime(null, 3), '—');
+  assert.equal(formatUtDateTime(t(2024, 3, 10, 23, 59, 40), fixedTz(3)), '2024-03-11 00:00 UT (03:00 UT+3)');
+  assert.equal(formatUtDateTime(t(2024, 3, 10, 18, 42, 30), fixedTz(-5.5)), '2024-03-10 18:43 UT (13:13 UT−5:30)');
+  assert.equal(formatUtDateTime(null, fixedTz(3)), '—');
+});
+
+test('the zone module formats offsets like the UI', () => {
+  for (const h of [0, 3, -5.5, 5.75, 12.75, -9.5, 14]) assert.equal(zoneFormatOffset(h), formatOffset(h));
 });
 
 test('Julian dates before 1582-10-15 keep their own leap years and the reform gap', () => {

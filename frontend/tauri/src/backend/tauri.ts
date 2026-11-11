@@ -27,6 +27,8 @@ import type {
   NearestCityParams,
   PngImage,
   SavedFile,
+  ZoneOffsets,
+  ZoneOffsetsParams,
 } from './types';
 
 async function call<T>(command: string, args?: Record<string, unknown>): Promise<T> {
@@ -84,6 +86,14 @@ export class TauriBackend implements Backend {
 
   loadDe440(params: LoadDe440Params): Promise<EphemerisBackendInfo> {
     return call('load_de440', { params });
+  }
+
+  timeZoneOffsets(params: ZoneOffsetsParams): Promise<ZoneOffsets> {
+    return call('time_zone_offsets', { params });
+  }
+
+  timeZoneNames(): Promise<string[]> {
+    return call('time_zone_names');
   }
 
   readonly sky = tauriSkyApi(call);

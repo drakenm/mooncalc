@@ -2,11 +2,12 @@
 // apsides and nodes, and seasons with the equation of time.
 
 import type { ApsidesNodesYear, LunarPhasesYear, RiseSetDay, RiseSetMonth, SeasonsYear, TwilightTimes, UtDateTime } from '../backend';
-import { changed, localDate, type Store } from '../state';
+import { changed, localDate, type Store, zoneParams } from '../state';
 import { localDayTime, MONTH_ABBR, MONTH_NAMES, timeLink, yearStepper, zoneLabel } from './app-time';
 import { debounce, h, replaceChildren } from './dom';
 import { runner, type EphemerisContext, type SubView } from './ephemeris-view';
 import { formatLat, formatLon } from './format';
+import { tzOf } from '../zone';
 
 /** Shared plumbing: recompute when shown and the inputs changed. */
 function lazy(compute: () => void): { show(): void; invalidate(): void } {
@@ -99,11 +100,11 @@ export function createRiseSetView({ backend, store }: EphemerisContext): SubView
     const s = store.get();
     const c = current();
     syncInputs();
-    void run('Computing rise and set', () => backend.tables.riseSetMonth({ year: c.year, month: c.month, tzOffsetHours: s.tzOffsetHours, location: s.location, ephemerisId: s.ephemerisId }), render);
+    void run('Computing rise and set', () => backend.tables.riseSetMonth({ year: c.year, month: c.month, ...zoneParams(s, { year: c.year, month: c.month, day: 1 }), location: s.location, ephemerisId: s.ephemerisId }), render);
   };
   const l = lazy(compute);
   store.subscribe((s, prev) => {
-    if (changed(s, prev, ['location', 'tzOffsetHours', 'ephemerisId'])) l.invalidate();
+    if (changed(s, prev, ['location', 'tzOffsetHours', 'timeZone', 'ephemerisId'])) l.invalidate();
     else if (pinned === null && changed(s, prev, ['instant'])) {
       const a = localDate(s);
       const b = localDate(prev);
@@ -142,7 +143,7 @@ export function createRiseSetView({ backend, store }: EphemerisContext): SubView
           h(
             'tr',
             {},
-            h('th', {}, `Date (${zoneLabel(m.tzOffsetHours)})`),
+            h('th', {}, `Date (${zoneLabel(tzOf(store.get()))})`),
             ...['Rise (az)', 'Transit (alt)', 'Set (az)', 'Rise (az)', 'Transit (alt)', 'Set (az)', 'Civil −6°', 'Nautical −12°', 'Astronomical −18°'].map((t) => h('th', { class: 'num' }, t)),
           ),
         ),
@@ -188,14 +189,14 @@ export function createPhasesView({ backend, store }: EphemerisContext): SubView 
   const year = followingYear(store, () => l.invalidate());
   const compute = () => {
     const s = store.get();
-    void run('Computing phases', () => backend.tables.lunarPhases({ year: year.year(), tzOffsetHours: s.tzOffsetHours, ephemerisId: s.ephemerisId }), render);
+    void run('Computing phases', () => backend.tables.lunarPhases({ year: year.year(), ...zoneParams(s, { year: year.year(), month: 1, day: 1 }), ephemerisId: s.ephemerisId }), render);
   };
   const l = lazy(compute);
   store.subscribe((s, prev) => {
-    if (changed(s, prev, ['tzOffsetHours', 'ephemerisId'])) l.invalidate();
+    if (changed(s, prev, ['tzOffsetHours', 'timeZone', 'ephemerisId'])) l.invalidate();
   });
   const render = (y: LunarPhasesYear) => {
-    const tz = store.get().tzOffsetHours;
+    const tz = tzOf(store.get());
     replaceChildren(
       out,
       h(
@@ -238,16 +239,16 @@ export function createApsidesView({ backend, store }: EphemerisContext): SubView
   const year = followingYear(store, () => l.invalidate());
   const compute = () => {
     const s = store.get();
-    void run('Computing apsides and nodes', () => backend.tables.apsidesNodes({ year: year.year(), tzOffsetHours: s.tzOffsetHours, ephemerisId: s.ephemerisId }), render);
+    void run('Computing apsides and nodes', () => backend.tables.apsidesNodes({ year: year.year(), ...zoneParams(s, { year: year.year(), month: 1, day: 1 }), ephemerisId: s.ephemerisId }), render);
   };
   const l = lazy(compute);
   store.subscribe((s, prev) => {
-    if (changed(s, prev, ['tzOffsetHours', 'ephemerisId'])) l.invalidate();
+    if (changed(s, prev, ['tzOffsetHours', 'timeZone', 'ephemerisId'])) l.invalidate();
   });
   const table = (title: string, heads: string[], rows: HTMLElement[]) =>
     h('section', {}, h('h3', {}, title), h('table', { class: 'criteria-table eph-table' }, h('thead', {}, h('tr', {}, ...heads.map((t, i) => h('th', { class: i ? 'num' : '' }, t)))), h('tbody', {}, ...rows)));
   const render = (y: ApsidesNodesYear) => {
-    const tz = store.get().tzOffsetHours;
+    const tz = tzOf(store.get());
     const minP = Math.min(...y.apsides.filter((a) => a.kind === 'perigee').map((a) => a.distanceKm));
     const maxA = Math.max(...y.apsides.filter((a) => a.kind === 'apogee').map((a) => a.distanceKm));
     replaceChildren(
@@ -329,11 +330,11 @@ export function createSeasonsView({ backend, store }: EphemerisContext): SubView
   const year = followingYear(store, () => l.invalidate());
   const compute = () => {
     const s = store.get();
-    void run('Computing seasons', () => backend.tables.seasons({ year: year.year(), tzOffsetHours: s.tzOffsetHours, ephemerisId: s.ephemerisId }), render);
+    void run('Computing seasons', () => backend.tables.seasons({ year: year.year(), ...zoneParams(s, { year: year.year(), month: 1, day: 1 }), ephemerisId: s.ephemerisId }), render);
   };
   const l = lazy(compute);
   store.subscribe((s, prev) => {
-    if (changed(s, prev, ['tzOffsetHours', 'ephemerisId'])) l.invalidate();
+    if (changed(s, prev, ['tzOffsetHours', 'timeZone', 'ephemerisId'])) l.invalidate();
   });
   const mmss = (v: number) => {
     const sgn = v < 0 ? '−' : '+';
@@ -342,7 +343,7 @@ export function createSeasonsView({ backend, store }: EphemerisContext): SubView
     return `${sgn}${mm}m ${String(Math.round((a - mm) * 60)).padStart(2, '0')}s`;
   };
   const render = (y: SeasonsYear) => {
-    const tz = store.get().tzOffsetHours;
+    const tz = tzOf(store.get());
     const max = y.equationOfTime.reduce((a, b) => (b.minutes > a.minutes ? b : a));
     const min = y.equationOfTime.reduce((a, b) => (b.minutes < a.minutes ? b : a));
     replaceChildren(

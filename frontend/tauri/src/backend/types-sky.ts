@@ -10,7 +10,10 @@ import type { CivilDate, Crescent, CrescentGeometry, Location, UtDateTime, Verdi
 
 export interface SkySceneParams {
   date: CivilDate;
+  /** Fixed offset from UT, hours, used when `timeZone` is absent. */
   tzOffsetHours: number;
+  /** IANA zone whose rules give the offset on each date; wins over `tzOffsetHours`. */
+  timeZone?: string | null;
   location: Location;
   crescent: Crescent;
   /** Default "yallop". */
@@ -62,7 +65,10 @@ export interface StarDto {
 export interface SkyScene {
   location: Location;
   date: CivilDate;
+  /** The offset at local civil noon (each time carries its own `offsetHours`). */
   tzOffsetHours: number;
+  /** The IANA zone used, if any. */
+  timeZone: string | null;
   crescent: Crescent;
   ephemeris: string;
   criterionId: string;
@@ -104,7 +110,10 @@ export interface SkyStars {
 
 export interface TrajectoryParams {
   date: CivilDate;
+  /** Fixed offset from UT, hours, used when `timeZone` is absent. */
   tzOffsetHours: number;
+  /** IANA zone whose rules give the offset on each date; wins over `tzOffsetHours`. */
+  timeZone?: string | null;
   location: Location;
   ephemerisId?: string | null;
 }
@@ -148,9 +157,13 @@ export interface PhaseEvent {
 export interface TrajectoryDay {
   location: Location;
   date: CivilDate;
+  /** The offset at the local midnight starting the day. */
   tzOffsetHours: number;
+  timeZone: string | null;
   ephemeris: string;
   dayStart: UtDateTime;
+  /** The next local midnight: 23 or 25 hours later when the clocks change. */
+  dayEnd: UtDateTime;
   stepMinutes: number;
   samples: TrackSample[];
   sun: BodyDayEvents;

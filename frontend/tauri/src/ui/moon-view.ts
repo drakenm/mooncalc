@@ -21,6 +21,7 @@ import { changed, type Store } from '../state';
 import { debounce, h, replaceChildren } from './dom';
 import { DEG, Stage, cssVar, dateHm, label, msToUt, norm360, utMs, zoneLabel } from './sky-common';
 import { ViewPrefs } from './view-prefs';
+import { tzOf } from '../zone';
 
 type Row = [string, string | Node];
 
@@ -241,7 +242,7 @@ export class MoonTabView {
 
     const refresh = debounce(() => void this.refresh(), 120);
     this.store.subscribe((s, prev) => {
-      if (changed(s, prev, ['instant', 'tzOffsetHours', 'location', 'ephemerisId'])) {
+      if (changed(s, prev, ['instant', 'tzOffsetHours', 'timeZone', 'location', 'ephemerisId'])) {
         this.stale = true;
         if (this.active) refresh();
       }
@@ -305,13 +306,13 @@ export class MoonTabView {
 
   private renderData(): void {
     const v = this.view!;
-    const tz = this.store.get().tzOffsetHours;
+    const tz = tzOf(this.store.get());
     const t = (x: UtDateTime | null) => (x ? `${dateHm(utMs(x), tz)}` : '—');
     const p = v.topocentricPhysical ?? v.geocentric;
     const f = (x: number, d = 2) => x.toFixed(d);
     const sgn = (x: number, d = 2) => `${x >= 0 ? '+' : '−'}${Math.abs(x).toFixed(d)}`;
     const rows: Row[] = [
-      ['Time', `${dateHm(utMs(v.instant), tz)} ${zoneLabel(tz)}`],
+      ['Time', `${dateHm(utMs(v.instant), tz)} ${zoneLabel(tz, utMs(v.instant))}`],
       ['Phase', v.phaseName],
       ['Illuminated', `${f(v.illuminatedFraction * 100, 1)} %`],
       ['Age', `${f(v.ageDays)} days (new Moon ${t(v.lastNewMoon)})`],
@@ -511,7 +512,7 @@ export class MoonTabView {
     dot(tr.points[0]!, 'rgb(90 90 90)', 'New');
     dot(tr.full, 'rgb(235 235 235)', 'Full');
     dot(tr.now, 'rgb(230 160 40)', 'now');
-    const tz = this.store.get().tzOffsetHours;
+    const tz = tzOf(this.store.get());
     label(ctx, `New Moon ${dateHm(utMs(tr.newMoon), tz)} → ${dateHm(utMs(tr.nextNewMoon), tz)} (geocentric)`, 4, hh - 8, muted, 'left', 'middle', 10);
   }
 }
