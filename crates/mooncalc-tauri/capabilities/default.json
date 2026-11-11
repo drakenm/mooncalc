@@ -19,6 +19,17 @@
     "allow-nearest-city",
     "allow-earliest-sighting",
     "allow-basemap",
-    "allow-load-de440"
+    "allow-load-de440",
+    "allow-calendar-list",
+    "allow-calendar-month-starts",
+    "allow-calendar-month",
+    "allow-calendar-convert",
+    "allow-calendar-compare",
+    "allow-ephemeris-table",
+    "allow-rise-set-month",
+    "allow-lunar-phases",
+    "allow-apsides-nodes",
+    "allow-eclipses",
+    "allow-seasons"
   ]
 }

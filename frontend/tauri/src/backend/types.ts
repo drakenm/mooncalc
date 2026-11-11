@@ -388,3 +388,5 @@ export interface Basemap {
 }
 
 export * from './types-sky';
+export * from './types-calendar';
+export * from './types-tables';

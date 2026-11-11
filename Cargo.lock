@@ -3131,6 +3131,7 @@ version = "0.1.0"
 dependencies = [
  "mooncalc-atlas",
  "mooncalc-core",
+ "mooncalc-hijri",
  "mooncalc-maps",
  "mooncalc-spk",
  "mooncalc-visibility",

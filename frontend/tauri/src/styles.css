@@ -507,14 +507,12 @@ input:invalid {
 /* ---- Content tabs --------------------------------------------------------- */
 
 .report-view,
-.placeholder,
 .about {
   max-width: 1100px;
   padding: 24px 28px;
 }
 
 .report-view h2,
-.placeholder h2,
 .about h2 {
   font-size: 20px;
   margin-bottom: 12px;
@@ -529,14 +527,6 @@ input:invalid {
   font-size: 15px;
   color: var(--text-muted);
   margin: 0 0 12px;
-}
-
-.placeholder ul {
-  padding-left: 20px;
-}
-
-.placeholder li {
-  margin: 4px 0;
 }
 
 .banner {

@@ -35,7 +35,9 @@
 //!   resolution), and the field gradient gives an exact anti-aliasing
 //!   distance. This is the most faithful option, at the cost of the grid
 //!   engine storing one `f32` per cell. Cells that are `None` in the grid
-//!   still mask the field.
+//!   still mask the field. Where a cell has a zone but no finite value
+//!   (lag +∞ when the Moon does not set), the pixels it touches fall back
+//!   to the bilinear vote, so the cell keeps its zone.
 //!
 //! The SVG back end emits zones from the grid cells (horizontal runs merged
 //! vertically into rectangles in lat/lon, reprojected), which keeps files
@@ -149,7 +151,9 @@ pub fn encode_png(img: &RgbaImage) -> Result<Vec<u8>, EncodeError> {
 #[derive(Clone, Copy, Debug)]
 pub struct ZoneField<'a> {
     /// One value per grid cell, same layout as [`VisibilityGrid::cells`].
-    /// Non-finite values are treated like `None` cells.
+    /// A `None` cell masks the field whatever its value. Around a cell with
+    /// a zone but a non-finite value, pixels are drawn by the bilinear vote
+    /// of the zones instead.
     pub values: &'a [f32],
     /// Zone boundaries in **descending** order: a value `>= thresholds[0]`
     /// is zone 0, `>= thresholds[1]` zone 1, ..., anything lower is zone

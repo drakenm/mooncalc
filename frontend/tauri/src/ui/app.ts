@@ -3,10 +3,11 @@
 import type { AppInfo, Backend, CriterionInfo } from '../backend';
 import type { Store } from '../state';
 import { createAbout } from './about';
+import { CalendarView } from './calendar-view';
+import { EphemerisView } from './ephemeris-view';
 import { createEarliestView } from './earliest-view';
 import { h } from './dom';
 import { MapView } from './map-view';
-import { createPlaceholder, PLACEHOLDERS } from './placeholders';
 import { ReportView } from './report-view';
 import { MoonTabView } from './moon-view';
 import { SkyView } from './sky-view';
@@ -24,7 +25,8 @@ interface Tab {
 
 const TAB_KEY = 'mooncalc.tab';
 
-const skyTab = (v: { el: HTMLElement; setActive(a: boolean): void }) => ({ panel: v.el, setActive: (a: boolean) => v.setActive(a) });
+/** The panel and activation hook of a view object. */
+const view = (v: { el: HTMLElement; setActive(a: boolean): void }) => ({ panel: v.el, setActive: (a: boolean) => v.setActive(a) });
 
 export interface AppContext {
   backend: Backend;
@@ -70,11 +72,11 @@ export function createApp(ctx: AppContext): HTMLElement {
         },
       }),
     },
-    { id: 'ephemeris', label: 'Ephemeris', panel: createPlaceholder(PLACEHOLDERS.ephemeris) },
-    { id: 'calendar', label: 'Calendar', panel: createPlaceholder(PLACEHOLDERS.calendar) },
-    { id: 'sky', label: 'Sky', ...skyTab(new SkyView(ctx.backend, ctx.store)) },
-    { id: 'moon', label: 'Moon', ...skyTab(new MoonTabView(ctx.backend, ctx.store)) },
-    { id: 'trajectory', label: 'Trajectory', ...skyTab(new TrajectoryView(ctx.backend, ctx.store)) },
+    { id: 'ephemeris', label: 'Ephemeris', ...view(new EphemerisView(ctx)) },
+    { id: 'calendar', label: 'Calendar', ...view(new CalendarView(ctx)) },
+    { id: 'sky', label: 'Sky', ...view(new SkyView(ctx.backend, ctx.store)) },
+    { id: 'moon', label: 'Moon', ...view(new MoonTabView(ctx.backend, ctx.store)) },
+    { id: 'trajectory', label: 'Trajectory', ...view(new TrajectoryView(ctx.backend, ctx.store)) },
     { id: 'about', label: 'About', panel: createAbout(ctx.info) },
   ];
 

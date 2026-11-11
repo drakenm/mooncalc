@@ -162,7 +162,10 @@ where
         let tabular = TABULAR_II_CIVIL.month_start(hijri_year, month)?;
         // Tabular day 1 is the civil day; its noon is JD `tabular`. The
         // conjunction usually precedes it by about one to two days.
-        let conjunction = (self.conjunction_near)(tabular as f64 - 1.5)?;
+        // A non-finite conjunction (an ephemeris outside its range) is a
+        // failed computation, not civil day 0.
+        let conjunction =
+            (self.conjunction_near)(tabular as f64 - 1.5).filter(|c| c.is_finite())?;
         self.rule.first_day(conjunction)
     }
 }
@@ -253,6 +256,16 @@ mod tests {
             sunset: |_| None,
         };
         assert_eq!(no_sunset.first_day(at(10.0)), None);
+    }
+
+    #[test]
+    fn non_finite_conjunction_gives_no_month() {
+        let noon_ut = ConjunctionBeforeLocalTime {
+            utc_offset_hours: 0.0,
+            cutoff_hours: 12.0,
+        };
+        let p = NewMoonRuleProvider::new(|_| Some(f64::NAN), noon_ut);
+        assert_eq!(p.month_start(1600, 1), None);
     }
 
     /// With mean conjunctions and a fixed sunset, "conjunction before sunset

@@ -44,8 +44,9 @@ pub(crate) fn maximize(mut f: impl FnMut(f64) -> f64, a: f64, b: f64, tol: f64) 
 }
 
 /// Root of `f` in `[a, b]` by the Illinois method, or `None` when
-/// `f(a)` and `f(b)` have the same sign. Converges superlinearly and
-/// never leaves the bracket.
+/// `f(a)` and `f(b)` have the same sign or either is not finite (e.g. an
+/// ephemeris outside its range). Converges superlinearly and never leaves
+/// the bracket.
 pub(crate) fn find_root(
     mut f: impl FnMut(f64) -> f64,
     mut a: f64,
@@ -54,6 +55,11 @@ pub(crate) fn find_root(
 ) -> Option<f64> {
     let mut fa = f(a);
     let mut fb = f(b);
+    if !fa.is_finite() || !fb.is_finite() {
+        // NaN fails every sign comparison, and the iteration would return
+        // Some(NaN).
+        return None;
+    }
     if fa == 0.0 {
         return Some(a);
     }
@@ -109,5 +115,9 @@ mod tests {
         let r = find_root(|x| x.cos() - x, 0.0, 1.0, 1e-12).unwrap();
         assert!((r - 0.739_085_133_215_160_6).abs() < 1e-10);
         assert!(find_root(|x| x * x + 1.0, -1.0, 1.0, 1e-9).is_none());
+        // A NaN end (an ephemeris outside its range) is no bracket.
+        let nan_above_half = |x: f64| if x > 0.5 { f64::NAN } else { x - 0.25 };
+        assert!(find_root(nan_above_half, 0.0, 1.0, 1e-9).is_none());
+        assert!(find_root(|_| f64::NAN, 0.0, 1.0, 1e-9).is_none());
     }
 }

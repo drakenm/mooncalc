@@ -18,6 +18,8 @@
 //! | [`sky`] | [`sky::sky_scene`], [`sky::sky_stars`]: evening/morning sky, crescent orientation, stars of date |
 //! | [`trajectory`] | [`trajectory::trajectory_day`]: 24-hour Sun and Moon track, events, phases |
 //! | [`moon`] | [`moon::moon_view`], [`moon::moon_features`]: physical ephemeris, libration curve, craters and maria |
+//! | [`calendar`] | [`calendar::CalendarEngine`]: Hijri calendars, month views, converter, month-start comparison |
+//! | [`tables`] | [`tables::ephemeris_table`], rise/set, phases, apsides and nodes, eclipses, seasons |
 //!
 //! # Portability
 //!
@@ -29,6 +31,7 @@
 
 pub mod atlas;
 pub mod basemap;
+pub mod calendar;
 pub mod codec;
 pub mod criteria;
 pub mod dto;
@@ -39,6 +42,7 @@ pub mod map;
 pub mod moon;
 pub mod report;
 pub mod sky;
+pub mod tables;
 pub mod trajectory;
 pub mod validate;
 
