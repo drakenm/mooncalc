@@ -3160,10 +3160,7 @@ dependencies = [
 name = "mooncalc-tauri"
 version = "0.1.0"
 dependencies = [
- "mooncalc-core",
- "mooncalc-maps",
- "mooncalc-spk",
- "mooncalc-visibility",
+ "mooncalc-app",
  "serde",
  "serde_json",
  "tauri",
