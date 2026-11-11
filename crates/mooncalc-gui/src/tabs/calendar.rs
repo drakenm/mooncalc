@@ -19,26 +19,46 @@
 //! a Hijri date to the civil day that begins after its first sunset (see
 //! [`mooncalc_hijri::HijriCalendar`]).
 //!
-//! **Extension point (visibility-based calendars):** month starts predicted
-//! from crescent visibility at the observer's location come from
-//! [`mooncalc_hijri::ObservedCalendar`] with a
-//! [`mooncalc_hijri::MonthStartProvider`] backed by the visibility engine
-//! (`settings.location`, `settings.criterion_id`). To add it: extend
-//! [`active_calendar`] to return such a calendar for a new id (the selector
-//! shows a disabled "Visibility-based (coming soon)" entry where it goes),
-//! and run its month-start scans as jobs ([`crate::jobs`]) from a `poll`
-//! method, since each month start needs a visibility search. Everything
-//! else in this tab works on `&dyn HijriCalendar`.
+//! **Computed calendars.** Besides the built-in tables and arithmetical
+//! calendars, the selector offers calendars computed with the selected
+//! ephemeris ([`mooncalc_visibility::calendar`]):
+//!
+//! * a **visibility-based** calendar: a month starts after the evening of its
+//!   29th day if the crescent is seen then under a criterion at a threshold
+//!   zone, at the app's location, at Mecca, or anywhere in a region preset
+//!   ([`VisibilityCalendarSettings`]); otherwise the month has 30 days;
+//! * **rule-based** calendars ([`RuleCalendar`]): the Umm al-Qura rules and
+//!   conjunction rules.
+//!
+//! Their month starts are computed by background jobs ([`crate::jobs`]),
+//! a few Hijri years at a time, for the years on screen (the selected date,
+//! the month view and the comparison table). Results are kept per
+//! configuration (spec, ephemeris), and the providers keep their own caches,
+//! so changing back to an earlier setting or year is instant. Until a year
+//! is computed, the calendar reports it as outside its range. Every computed
+//! calendar also gets a column in the comparison table.
 
+use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::sync::{Arc, Mutex};
+
+use mooncalc_core::{Ephemeris, GeoLocation, MeeusEphemeris};
+use mooncalc_hijri::chained::{month_from_index, month_index};
 use mooncalc_hijri::civil::{CivilCalendar, CivilDate};
+use mooncalc_hijri::tabular::TABULAR_II_CIVIL;
 use mooncalc_hijri::{
-    CalendarInfo, DEFAULT_CALENDAR_ID, GridDay, HijriCalendar, HijriDate, HijriMonth, MonthGrid,
-    Weekday, calendars, civil_month_grid, hijri_month_grid, info_by_id,
+    CalendarInfo, CalendarKind, DEFAULT_CALENDAR_ID, GridDay, HijriCalendar, HijriDate, HijriMonth,
+    MonthGrid, MonthStartProvider, ObservedCalendar, Weekday, calendars, civil_month_grid,
+    hijri_month_grid, info_by_id,
+};
+use mooncalc_visibility::calendar::{
+    DynProvider, MECCA, Observers, RegionPreset, RuleCalendar, VisibilityProvider,
 };
 use serde::{Deserialize, Serialize};
 
+use crate::backend::{self, BackendChoice};
 use crate::datetime;
-use crate::settings::TimeSettings;
+use crate::jobs::{JobContext, JobError, JobSlot};
+use crate::settings::{LocationSettings, Settings, TimeSettings};
 
 use super::TabContext;
 
@@ -69,6 +89,10 @@ const HIJRI_MONTH_ABBR: [&str; 12] = [
 
 /// Characters the transliterated month names need beyond basic Latin.
 const DIACRITIC_SAMPLE: &str = "ḌḍḤḥṢṣĀāĪīŪūʿ";
+
+/// Shown for days a calendar cannot convert (outside its range, or a
+/// computed calendar's years not computed yet).
+const OUTSIDE_RANGE: &str = "outside this calendar's range (or not computed yet)";
 
 const SUNSET_NOTE: &str = "The Islamic day begins at sunset. As in almanacs and official \
 calendars, each Hijri date is shown on the civil day (midnight to midnight) that begins after \
@@ -111,6 +135,8 @@ pub struct CalendarSettings {
     pub calendar_id: String,
     pub primary: PrimaryCalendar,
     pub week_start: WeekStart,
+    /// Configuration of the visibility-based calendar.
+    pub visibility: VisibilityCalendarSettings,
 }
 
 impl Default for CalendarSettings {
@@ -119,6 +145,44 @@ impl Default for CalendarSettings {
             calendar_id: DEFAULT_CALENDAR_ID.into(),
             primary: PrimaryCalendar::Hijri,
             week_start: WeekStart::Saturday,
+            visibility: VisibilityCalendarSettings::default(),
+        }
+    }
+}
+
+/// Id of the visibility-based calendar in [`CalendarSettings::calendar_id`].
+pub const VISIBILITY_ID: &str = "visibility";
+
+/// [`VisibilityCalendarSettings::observers`]: the app's observer location.
+pub const OBSERVERS_APP_LOCATION: &str = "location";
+/// [`VisibilityCalendarSettings::observers`]: the Kaʿba, Mecca.
+pub const OBSERVERS_MECCA: &str = "mecca";
+
+/// Settings of the visibility-based calendar.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct VisibilityCalendarSettings {
+    /// `Criterion::id`.
+    pub criterion_id: String,
+    /// Threshold: the crescent counts as seen in this zone or a better one
+    /// (0 = the criterion's most visible zone).
+    pub max_zone: usize,
+    /// [`OBSERVERS_APP_LOCATION`], [`OBSERVERS_MECCA`] or a
+    /// [`RegionPreset::id`] ("visible anywhere in the region").
+    pub observers: String,
+    /// Grid spacing for regions, degrees.
+    pub grid_step_deg: f64,
+}
+
+impl Default for VisibilityCalendarSettings {
+    /// Yallop zone B or better ("visible under perfect conditions", i.e.
+    /// naked eye) at the app's location.
+    fn default() -> Self {
+        Self {
+            criterion_id: "yallop".into(),
+            max_zone: 1,
+            observers: OBSERVERS_APP_LOCATION.into(),
+            grid_step_deg: 5.0,
         }
     }
 }
@@ -130,10 +194,334 @@ pub fn selected_info(id: &str) -> &'static CalendarInfo {
         .unwrap_or(&calendars()[0])
 }
 
-/// The calendar the tab works with. Today a built-in calendar; the hook for
-/// visibility-based calendars (see the module docs).
-pub fn active_calendar(settings: &CalendarSettings) -> &'static (dyn HijriCalendar + Sync) {
+/// Whether `id` names a computed calendar (visibility- or rule-based).
+pub fn is_computed_id(id: &str) -> bool {
+    id == VISIBILITY_ID || RuleCalendar::from_id(id).is_some()
+}
+
+/// A calendar computed with the ephemeris.
+#[derive(Clone, Debug, PartialEq)]
+pub enum ComputedSpec {
+    /// Crescent visibility.
+    Visibility {
+        criterion_id: String,
+        max_zone: usize,
+        observers: Observers,
+        /// Label of the observers, for display.
+        place: String,
+    },
+    /// An astronomical rule.
+    Rule(RuleCalendar),
+}
+
+impl ComputedSpec {
+    /// The visibility-based calendar configured in `vs`; `location` is the
+    /// app's observer.
+    pub fn visibility(vs: &VisibilityCalendarSettings, location: &LocationSettings) -> Self {
+        let (observers, place) = match vs.observers.as_str() {
+            OBSERVERS_MECCA => (Observers::Place(MECCA), "Mecca".to_owned()),
+            id => match RegionPreset::from_id(id) {
+                Some(r) => (
+                    Observers::Region {
+                        region: r.region(),
+                        step_deg: vs.grid_step_deg.clamp(1.0, 30.0),
+                    },
+                    format!("anywhere in {}", r.name()),
+                ),
+                None => (
+                    Observers::Place(GeoLocation::new(
+                        location.lat_deg,
+                        location.lon_deg,
+                        location.elevation_m,
+                    )),
+                    location.name.clone(),
+                ),
+            },
+        };
+        ComputedSpec::Visibility {
+            criterion_id: vs.criterion_id.clone(),
+            max_zone: vs.max_zone,
+            observers,
+            place,
+        }
+    }
+
+    /// The calendar id ([`VISIBILITY_ID`] or the rule's id).
+    pub fn id(&self) -> &'static str {
+        match self {
+            ComputedSpec::Visibility { .. } => VISIBILITY_ID,
+            ComputedSpec::Rule(r) => r.id(),
+        }
+    }
+
+    /// Display name, e.g. "Visibility: Yallop (1997) ≤ B, Mecca".
+    pub fn name(&self) -> String {
+        match self {
+            ComputedSpec::Visibility {
+                criterion_id,
+                max_zone,
+                place,
+                ..
+            } => {
+                let (name, zone) = match mooncalc_visibility::criteria::by_id(criterion_id) {
+                    Some(c) => (
+                        c.name().to_owned(),
+                        c.zones()
+                            .get(*max_zone)
+                            .map_or("?".to_owned(), |z| z.code.to_owned()),
+                    ),
+                    None => (criterion_id.clone(), max_zone.to_string()),
+                };
+                format!("Visibility: {name} ≤ {zone}, {place}")
+            }
+            ComputedSpec::Rule(r) => r.name().to_owned(),
+        }
+    }
+
+    /// One-sentence description.
+    pub fn description(&self) -> &'static str {
+        match self {
+            ComputedSpec::Visibility { .. } => {
+                "A month starts the day after the evening of its 29th day if the crescent is \
+                 seen that evening (the criterion reaches the threshold zone or better); \
+                 otherwise the month completes 30 days. Computed with the selected ephemeris."
+            }
+            ComputedSpec::Rule(r) => r.description(),
+        }
+    }
+
+    /// A short column label for the comparison table.
+    pub fn short_label(&self) -> &'static str {
+        match self {
+            ComputedSpec::Visibility { .. } => "Visibility",
+            ComputedSpec::Rule(RuleCalendar::UmmAlQuraRule) => "UQ rule",
+            ComputedSpec::Rule(RuleCalendar::ConjunctionBeforeSunsetMecca) => "Conj<sunset",
+            ComputedSpec::Rule(RuleCalendar::ConjunctionBeforeNoonUt) => "Conj<12 UT",
+        }
+    }
+
+    /// Cache key of this calendar computed with an ephemeris.
+    fn key(&self, backend: BackendChoice, de440_path: &str) -> String {
+        let spec = match self {
+            ComputedSpec::Visibility {
+                criterion_id,
+                max_zone,
+                observers,
+                ..
+            } => format!("visibility|{criterion_id}|{max_zone}|{observers:?}"),
+            ComputedSpec::Rule(r) => r.id().to_owned(),
+        };
+        format!("{spec}|{:?}|{}", backend.effective(), de440_path.trim())
+    }
+
+    /// The month-start provider, computed with `eph`.
+    fn provider(&self, eph: Arc<dyn Ephemeris>) -> Result<DynProvider, String> {
+        match self {
+            ComputedSpec::Visibility {
+                criterion_id,
+                max_zone,
+                observers,
+                ..
+            } => {
+                let criterion = mooncalc_visibility::criteria::by_id(criterion_id)
+                    .ok_or_else(|| format!("Unknown criterion {criterion_id:?}"))?;
+                Ok(Box::new(VisibilityProvider::new(
+                    eph,
+                    Arc::from(criterion),
+                    *max_zone,
+                    observers,
+                )))
+            }
+            ComputedSpec::Rule(r) => Ok(r.provider(eph)),
+        }
+    }
+}
+
+/// Every computed calendar for the current settings: the configured
+/// visibility-based calendar, then the rule-based ones.
+pub fn computed_specs(settings: &Settings) -> Vec<ComputedSpec> {
+    std::iter::once(ComputedSpec::visibility(
+        &settings.calendar.visibility,
+        &settings.location,
+    ))
+    .chain(RuleCalendar::ALL.into_iter().map(ComputedSpec::Rule))
+    .collect()
+}
+
+/// Month starts known so far, as a provider (`None` for months not yet
+/// computed).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct KnownStarts(pub BTreeMap<i64, i64>);
+
+impl MonthStartProvider for KnownStarts {
+    fn month_start(&self, hijri_year: i32, month: u8) -> Option<i64> {
+        if !(1..=12).contains(&month) {
+            return None;
+        }
+        self.0.get(&month_index(hijri_year, month)).copied()
+    }
+}
+
+/// The calendar the tab shows: a built-in one, or a computed one with the
+/// years computed so far.
+#[derive(Clone)]
+pub enum ActiveCalendar {
+    Builtin(&'static (dyn HijriCalendar + Sync)),
+    Computed(Arc<ObservedCalendar<KnownStarts>>),
+}
+
+impl ActiveCalendar {
+    pub fn get(&self) -> &dyn HijriCalendar {
+        match self {
+            ActiveCalendar::Builtin(c) => *c,
+            ActiveCalendar::Computed(c) => c.as_ref(),
+        }
+    }
+}
+
+/// The built-in calendar for the selected id (the default one for a
+/// computed or unknown id).
+pub fn builtin_calendar(settings: &CalendarSettings) -> &'static (dyn HijriCalendar + Sync) {
     selected_info(&settings.calendar_id).calendar
+}
+
+/// Ephemeris and providers shared with the background jobs, so that their
+/// caches outlive any one job.
+#[derive(Default)]
+struct Engine {
+    ephemeris: Mutex<Option<(String, Arc<dyn Ephemeris>)>>,
+    providers: Mutex<HashMap<String, Arc<DynProvider>>>,
+}
+
+/// Providers kept at most (all are dropped when this is exceeded).
+const MAX_PROVIDERS: usize = 24;
+
+impl Engine {
+    fn ephemeris(
+        &self,
+        backend: BackendChoice,
+        de440_path: &str,
+    ) -> Result<Arc<dyn Ephemeris>, String> {
+        let key = format!("{:?}|{}", backend.effective(), de440_path.trim());
+        let mut slot = self.ephemeris.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some((k, eph)) = slot.as_ref()
+            && *k == key
+        {
+            return Ok(eph.clone());
+        }
+        let eph = match backend::create_ephemeris(backend, de440_path) {
+            Ok(eph) => eph,
+            // The built-in theory needs no setup; use it even if the backend
+            // layer cannot provide it.
+            Err(_) if backend.effective() == BackendChoice::Meeus => {
+                Arc::new(MeeusEphemeris::new()) as Arc<dyn Ephemeris>
+            }
+            Err(e) => return Err(e),
+        };
+        *slot = Some((key, eph.clone()));
+        Ok(eph)
+    }
+
+    fn provider(
+        &self,
+        key: &str,
+        spec: &ComputedSpec,
+        eph: &Arc<dyn Ephemeris>,
+    ) -> Result<Arc<DynProvider>, String> {
+        if let Some(p) = self.lock_providers().get(key) {
+            return Ok(p.clone());
+        }
+        let p = Arc::new(spec.provider(eph.clone())?);
+        let mut map = self.lock_providers();
+        if map.len() >= MAX_PROVIDERS {
+            map.clear();
+        }
+        Ok(map.entry(key.to_owned()).or_insert(p).clone())
+    }
+
+    fn lock_providers(&self) -> std::sync::MutexGuard<'_, HashMap<String, Arc<DynProvider>>> {
+        self.providers.lock().unwrap_or_else(|e| e.into_inner())
+    }
+}
+
+/// One unit of background work: one Hijri year of one computed calendar.
+#[derive(Clone, Debug, PartialEq)]
+struct YearRequest {
+    key: String,
+    spec: ComputedSpec,
+    year: i32,
+}
+
+/// What a job returns: per request (key, year), the month starts found
+/// (month index → JDN), including the following Muḥarram.
+type BatchResult = Vec<(String, i32, Vec<(i64, i64)>)>;
+
+/// Requests per job: small batches deliver results progressively and lose
+/// little when replaced.
+const BATCH_SIZE: usize = 4;
+
+/// Compute a batch of years on a worker thread.
+fn compute_batch(
+    engine: &Engine,
+    backend: BackendChoice,
+    de440_path: &str,
+    batch: &[YearRequest],
+    job: &JobContext,
+) -> Result<BatchResult, JobError> {
+    let eph = engine
+        .ephemeris(backend, de440_path)
+        .map_err(JobError::Failed)?;
+    let total = batch.len() * 13;
+    let mut out = Vec::with_capacity(batch.len());
+    for (b, req) in batch.iter().enumerate() {
+        let provider = engine
+            .provider(&req.key, &req.spec, &eph)
+            .map_err(JobError::Failed)?;
+        let first = month_index(req.year, 1);
+        let mut starts = Vec::with_capacity(13);
+        for (i, n) in (first..=first + 12).enumerate() {
+            job.checkpoint()?;
+            let (y, m) = month_from_index(n);
+            if let Some(jdn) = provider.month_start(y, m) {
+                starts.push((n, jdn));
+            }
+            job.set_progress((b * 13 + i + 1) as f32 / total as f32);
+        }
+        out.push((req.key.clone(), req.year, starts));
+    }
+    Ok(out)
+}
+
+/// Results of one computed calendar received so far.
+#[derive(Default)]
+struct Computed {
+    starts: BTreeMap<i64, i64>,
+    years: BTreeSet<i32>,
+    calendar: Option<Arc<ObservedCalendar<KnownStarts>>>,
+}
+
+impl Computed {
+    fn add(&mut self, year: i32, starts: Vec<(i64, i64)>, spec: &ComputedSpec) {
+        self.starts.extend(starts);
+        self.years.insert(year);
+        let (Some(&first), Some(&last)) = (self.years.first(), self.years.last()) else {
+            return;
+        };
+        self.calendar = Some(Arc::new(ObservedCalendar::new(
+            KnownStarts(self.starts.clone()),
+            spec.id(),
+            spec.name(),
+            first,
+            last,
+        )));
+    }
+}
+
+/// The Hijri year containing civil day `jdn`, near enough to choose which
+/// years to compute (the tabular calendar is within a few days of any lunar
+/// calendar).
+fn approximate_hijri_year(jdn: i64) -> i32 {
+    TABULAR_II_CIVIL.to_hijri(jdn).map_or(1448, |h| h.year)
 }
 
 /// The civil day (JDN) containing Julian Date `jd`.
@@ -350,6 +738,15 @@ pub fn short_label(id: &str) -> &str {
     }
 }
 
+/// One column of the comparison table.
+struct Column<'a> {
+    id: &'a str,
+    label: String,
+    hover: String,
+    calendar: &'a dyn HijriCalendar,
+    computed: bool,
+}
+
 /// Converter inputs.
 #[derive(Debug, Clone, Copy)]
 struct ConverterState {
@@ -358,20 +755,211 @@ struct ConverterState {
 }
 
 /// State of the Calendar tab.
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub struct CalendarTab {
     /// The month on screen; `None` until first drawn.
     view: Option<MonthView>,
-    /// What the view was last centred on: (selected day, primary, calendar).
-    centred_on: Option<(i64, PrimaryCalendar, String)>,
+    /// What the view was last centred on: (selected day, primary, calendar,
+    /// whether the calendar covered the day).
+    centred_on: Option<(i64, PrimaryCalendar, String, bool)>,
     converter: Option<ConverterState>,
     /// Hijri year of the comparison table; `None` follows the selected date.
     comparison_year: Option<i32>,
     /// Whether the fonts can show the transliteration diacritics.
     diacritics: Option<bool>,
+    /// Ephemeris and month-start providers shared with the jobs.
+    engine: Arc<Engine>,
+    /// Computed month starts per calendar key.
+    computed: HashMap<String, Computed>,
+    job: JobSlot<BatchResult>,
+    /// What the running job computes.
+    in_flight: Vec<YearRequest>,
+    /// The request that last failed; not retried until the request changes.
+    failed: Option<Vec<YearRequest>>,
+    error: Option<String>,
+    /// Hijri years on screen, most important first (set by `ui`).
+    wanted_years: Vec<i32>,
 }
 
 impl CalendarTab {
+    /// The computed calendars for the current settings, with their keys.
+    fn specs(settings: &Settings) -> Vec<(String, ComputedSpec)> {
+        computed_specs(settings)
+            .into_iter()
+            .map(|s| (s.key(settings.backend, &settings.de440_path), s))
+            .collect()
+    }
+
+    /// The months of `spec` computed so far, as a calendar (empty if none).
+    fn computed_calendar(
+        &self,
+        key: &str,
+        spec: &ComputedSpec,
+    ) -> Arc<ObservedCalendar<KnownStarts>> {
+        self.computed
+            .get(key)
+            .and_then(|c| c.calendar.clone())
+            .unwrap_or_else(|| {
+                Arc::new(ObservedCalendar::new(
+                    KnownStarts::default(),
+                    spec.id(),
+                    spec.name(),
+                    1,
+                    0,
+                ))
+            })
+    }
+
+    /// The calendar the tab works with.
+    pub fn active_calendar(&self, settings: &Settings) -> ActiveCalendar {
+        let id = settings.calendar.calendar_id.as_str();
+        if !is_computed_id(id) {
+            return ActiveCalendar::Builtin(builtin_calendar(&settings.calendar));
+        }
+        match Self::specs(settings)
+            .into_iter()
+            .find(|(_, s)| s.id() == id)
+        {
+            Some((key, spec)) => ActiveCalendar::Computed(self.computed_calendar(&key, &spec)),
+            None => ActiveCalendar::Builtin(builtin_calendar(&settings.calendar)),
+        }
+    }
+
+    /// The (calendar, year) pairs on screen that have not been computed,
+    /// the selected calendar first.
+    fn missing(&self, settings: &Settings) -> Vec<YearRequest> {
+        let selected = settings.calendar.calendar_id.as_str();
+        let mut specs = Self::specs(settings);
+        specs.sort_by_key(|(_, s)| s.id() != selected);
+        let mut out = Vec::new();
+        for (key, spec) in specs {
+            for &year in &self.wanted_years {
+                let done = self
+                    .computed
+                    .get(&key)
+                    .is_some_and(|c| c.years.contains(&year));
+                if !done {
+                    out.push(YearRequest {
+                        key: key.clone(),
+                        spec: spec.clone(),
+                        year,
+                    });
+                }
+            }
+        }
+        out
+    }
+
+    /// Collect finished month starts and start jobs for the missing years.
+    pub fn poll(&mut self, ctx: &egui::Context, tc: &mut TabContext<'_>) {
+        match self.job.poll() {
+            Some(Ok(results)) => {
+                for (key, year, starts) in results {
+                    if let Some(req) = self.in_flight.iter().find(|r| r.key == key) {
+                        let spec = req.spec.clone();
+                        self.computed
+                            .entry(key)
+                            .or_default()
+                            .add(year, starts, &spec);
+                    }
+                }
+                self.error = None;
+            }
+            Some(Err(e)) => {
+                tc.status.error(format!("Calendar: {e}"));
+                self.error = Some(e);
+                self.failed = Some(self.missing(tc.settings));
+            }
+            None => {}
+        }
+        if !self.job.is_running() {
+            self.in_flight.clear();
+        }
+
+        let missing = self.missing(tc.settings);
+        // Replace a job whose work is no longer wanted (settings changed).
+        if self.job.is_running() && self.in_flight.iter().any(|r| !missing.contains(r)) {
+            self.job.cancel();
+            self.in_flight.clear();
+        }
+        if !self.job.is_running() && !missing.is_empty() && self.failed.as_ref() != Some(&missing) {
+            self.failed = None;
+            let batch: Vec<YearRequest> = missing.into_iter().take(BATCH_SIZE).collect();
+            self.in_flight = batch.clone();
+            let engine = self.engine.clone();
+            let backend = tc.settings.backend;
+            let path = tc.settings.de440_path.clone();
+            let repaint = ctx.clone();
+            self.job.submit(
+                "Computing Hijri month starts",
+                move || repaint.request_repaint(),
+                move |job| compute_batch(&engine, backend, &path, &batch, job),
+            );
+        }
+        if let Some(progress) = self.job.progress() {
+            tc.status.report_job(progress);
+        }
+    }
+
+    /// Remember which Hijri years are on screen, for [`Self::poll`].
+    fn set_wanted_years(&mut self, settings: &Settings, cal: &dyn HijriCalendar) {
+        let selected = selected_day(&settings.time);
+        let mut years = Vec::new();
+        // A few days either side, in case the computed calendar puts the
+        // year boundary elsewhere than the tabular estimate.
+        for jdn in [selected, selected - 3, selected + 3] {
+            years.push(approximate_hijri_year(jdn));
+        }
+        let centre = years[0];
+        let near = move |y: i32| (y - centre).abs() <= 300;
+        if let Some(view) = self.view {
+            match view {
+                MonthView::Hijri { year, .. } if near(year) => years.push(year),
+                MonthView::Civil { year, month } => {
+                    if let Some(first) = CivilDate::new(year, month, 1).to_jdn(CIVIL) {
+                        years.push(approximate_hijri_year(first - 3));
+                        years.push(approximate_hijri_year(first + 34));
+                    }
+                }
+                MonthView::Hijri { .. } => {}
+            }
+        }
+        if let Some(y) = self.comparison_year.filter(|&y| near(y)) {
+            years.push(y);
+        } else {
+            years.push(cal.to_hijri(selected).map_or(centre, |h| h.year));
+        }
+        if let Some(c) = &self.converter {
+            if let Some(jdn) = CivilDate::new(c.civil.0, c.civil.1, c.civil.2).to_jdn(CIVIL) {
+                years.push(approximate_hijri_year(jdn));
+            }
+            years.push(c.hijri.0);
+        }
+        let mut seen = BTreeSet::new();
+        years.retain(|&y| (1..=9999).contains(&y) && near(y) && seen.insert(y));
+        self.wanted_years = years;
+    }
+
+    /// Progress or problems of the computed calendars, for the selector.
+    fn computed_status(&self, ui: &mut egui::Ui, cal: &dyn HijriCalendar) {
+        if let Some(e) = &self.error {
+            ui.colored_label(
+                ui.visuals().error_fg_color,
+                format!("Computation failed: {e}"),
+            );
+        } else if let Some(p) = self.job.progress() {
+            ui.horizontal(|ui| {
+                ui.spinner();
+                ui.label(format!(
+                    "Computing month starts… {:.0}%",
+                    100.0 * p.fraction
+                ));
+            });
+        } else if cal.supported_range().first_year > cal.supported_range().last_year {
+            ui.weak("Month starts are computed for the years on screen.");
+        }
+    }
+
     pub fn ui(&mut self, ui: &mut egui::Ui, tc: &mut TabContext<'_>) {
         let diacritics = *self.diacritics.get_or_insert_with(|| {
             ui.ctx()
@@ -379,10 +967,14 @@ impl CalendarTab {
         });
         egui::ScrollArea::vertical().show(ui, |ui| {
             ui.heading("Hijri calendar");
-            calendar_selector(ui, &mut tc.settings.calendar);
+            calendar_selector(ui, tc.settings);
+            let active = self.active_calendar(tc.settings);
+            let cal = active.get();
+            if is_computed_id(&tc.settings.calendar.calendar_id) {
+                self.computed_status(ui, cal);
+            }
             ui.add(egui::Label::new(egui::RichText::new(SUNSET_NOTE).small().weak()).wrap());
 
-            let cal = active_calendar(&tc.settings.calendar);
             let selected = selected_day(&tc.settings.time);
             ui.add_space(4.0);
             ui.horizontal_wrapped(|ui| {
@@ -391,7 +983,7 @@ impl CalendarTab {
                 let weekday = Weekday::from_jdn(selected).name_english();
                 match cal.to_hijri(selected) {
                     Some(h) => ui.strong(format_hijri(h, diacritics)),
-                    None => ui.weak("outside this calendar's range"),
+                    None => ui.weak(OUTSIDE_RANGE),
                 };
                 ui.label(format!("— {weekday} {} (local)", format_civil(civil)));
             });
@@ -399,17 +991,24 @@ impl CalendarTab {
             ui.add_space(6.0);
             egui::CollapsingHeader::new("Month view")
                 .default_open(true)
-                .show(ui, |ui| self.month_view(ui, tc, diacritics));
+                .show(ui, |ui| self.month_view(ui, tc, cal, diacritics));
             egui::CollapsingHeader::new("Date converter")
                 .default_open(true)
-                .show(ui, |ui| self.converter(ui, tc, diacritics));
+                .show(ui, |ui| self.converter(ui, tc, cal, diacritics));
             egui::CollapsingHeader::new("Month starts under every calendar")
                 .default_open(true)
-                .show(ui, |ui| self.comparison(ui, tc, diacritics));
+                .show(ui, |ui| self.comparison(ui, tc, cal, diacritics));
+            self.set_wanted_years(tc.settings, cal);
         });
     }
 
-    fn month_view(&mut self, ui: &mut egui::Ui, tc: &mut TabContext<'_>, diacritics: bool) {
+    fn month_view(
+        &mut self,
+        ui: &mut egui::Ui,
+        tc: &mut TabContext<'_>,
+        cal: &dyn HijriCalendar,
+        diacritics: bool,
+    ) {
         let cs = &mut tc.settings.calendar;
         ui.horizontal_wrapped(|ui| {
             ui.label("Lay out by:");
@@ -430,7 +1029,6 @@ impl CalendarTab {
                 });
         });
 
-        let cal = active_calendar(cs);
         let primary = cs.primary;
         let week_start = cs.week_start.weekday();
         let selected = selected_day(&tc.settings.time);
@@ -438,7 +1036,12 @@ impl CalendarTab {
 
         // Re-centre on the selected date when it, the layout or the
         // calendar changes; otherwise keep the month the user navigated to.
-        let key = (selected, primary, cs.calendar_id.clone());
+        let key = (
+            selected,
+            primary,
+            cs.calendar_id.clone(),
+            cal.to_hijri(selected).is_some(),
+        );
         if self.centred_on.as_ref() != Some(&key) || self.view.is_none() {
             self.view = Some(MonthView::containing(selected, primary, cal));
             self.centred_on = Some(key);
@@ -478,7 +1081,7 @@ impl CalendarTab {
         self.view = Some(view);
 
         let Some(grid) = view.grid(cal) else {
-            ui.weak("This month is outside the selected calendar's range.");
+            ui.weak(format!("This month is {OUTSIDE_RANGE}."));
             return;
         };
         // The months on the other calendar this month touches.
@@ -505,8 +1108,13 @@ impl CalendarTab {
         }
     }
 
-    fn converter(&mut self, ui: &mut egui::Ui, tc: &mut TabContext<'_>, diacritics: bool) {
-        let cal = active_calendar(&tc.settings.calendar);
+    fn converter(
+        &mut self,
+        ui: &mut egui::Ui,
+        tc: &mut TabContext<'_>,
+        cal: &dyn HijriCalendar,
+        diacritics: bool,
+    ) {
         let selected = selected_day(&tc.settings.time);
         let from_day = |jdn: i64| {
             let c = CivilDate::from_jdn(jdn, CIVIL);
@@ -552,7 +1160,7 @@ impl CalendarTab {
                                     format_hijri(h, diacritics),
                                     Weekday::from_jdn(jdn).name_english()
                                 )),
-                                None => ui.weak("outside this calendar's range"),
+                                None => ui.weak(OUTSIDE_RANGE),
                             };
                             if ui.small_button("Set date").clicked() {
                                 set_app_day = Some(jdn);
@@ -628,10 +1236,17 @@ impl CalendarTab {
         }
     }
 
-    fn comparison(&mut self, ui: &mut egui::Ui, tc: &mut TabContext<'_>, diacritics: bool) {
-        let cal = active_calendar(&tc.settings.calendar);
+    fn comparison(
+        &mut self,
+        ui: &mut egui::Ui,
+        tc: &mut TabContext<'_>,
+        cal: &dyn HijriCalendar,
+        diacritics: bool,
+    ) {
         let selected = selected_day(&tc.settings.time);
-        let following = cal.to_hijri(selected).map_or(1448, |h| h.year);
+        let following = cal
+            .to_hijri(selected)
+            .map_or_else(|| approximate_hijri_year(selected), |h| h.year);
         let mut year = self.comparison_year.unwrap_or(following);
         ui.horizontal(|ui| {
             ui.label("Hijri year:");
@@ -666,11 +1281,41 @@ impl CalendarTab {
         });
         let year = self.comparison_year.unwrap_or(following);
 
-        let infos = calendars();
-        let cals: Vec<&dyn HijriCalendar> = infos.iter().map(|i| i.calendar as _).collect();
+        // Columns: the Umm al-Qura tables, the computed calendars, then the
+        // arithmetical calendars.
+        let computed: Vec<(ComputedSpec, Arc<ObservedCalendar<KnownStarts>>)> =
+            Self::specs(tc.settings)
+                .into_iter()
+                .map(|(key, spec)| {
+                    let cal = self.computed_calendar(&key, &spec);
+                    (spec, cal)
+                })
+                .collect();
+        let mut columns: Vec<Column<'_>> = Vec::new();
+        let (uaq, tabular): (Vec<_>, Vec<_>) = calendars()
+            .iter()
+            .partition(|i| i.kind == CalendarKind::UmmAlQura);
+        let builtin = |i: &'static CalendarInfo| Column {
+            id: i.id,
+            label: short_label(i.id).to_owned(),
+            hover: format!("{}\n{}", i.name, i.description),
+            calendar: i.calendar,
+            computed: false,
+        };
+        columns.extend(uaq.into_iter().map(builtin));
+        columns.extend(computed.iter().map(|(spec, cal)| Column {
+            id: spec.id(),
+            label: spec.short_label().to_owned(),
+            hover: format!("{}\n{}", spec.name(), spec.description()),
+            calendar: cal.as_ref(),
+            computed: true,
+        }));
+        columns.extend(tabular.into_iter().map(builtin));
+        let cals: Vec<&dyn HijriCalendar> = columns.iter().map(|c| c.calendar).collect();
         let rows = compare_month_starts(year, &cals);
         let current = &tc.settings.calendar.calendar_id;
         let warn = ui.visuals().warn_fg_color;
+        let computing = self.job.is_running();
 
         egui::ScrollArea::horizontal()
             .id_salt("comparison_scroll")
@@ -680,15 +1325,14 @@ impl CalendarTab {
                     .spacing([10.0, 4.0])
                     .show(ui, |ui| {
                         ui.strong("Month");
-                        for info in infos {
-                            let label = egui::RichText::new(short_label(info.id));
-                            let label = if info.id == current {
+                        for column in &columns {
+                            let label = egui::RichText::new(&column.label);
+                            let label = if column.id == current {
                                 label.strong().underline()
                             } else {
                                 label.strong()
                             };
-                            ui.label(label)
-                                .on_hover_text(format!("{}\n{}", info.name, info.description));
+                            ui.label(label).on_hover_text(&column.hover);
                         }
                         ui.end_row();
 
@@ -702,6 +1346,9 @@ impl CalendarTab {
                             }
                             for (i, start) in row.starts.iter().enumerate() {
                                 match start {
+                                    None if columns[i].computed && computing => {
+                                        ui.weak("…").on_hover_text("Computing…");
+                                    }
                                     None => {
                                         ui.weak("—").on_hover_text("Outside this calendar's range");
                                     }
@@ -743,37 +1390,150 @@ impl CalendarTab {
 
 /// The calendar selector, with the selected calendar's description and
 /// data attribution.
-fn calendar_selector(ui: &mut egui::Ui, cs: &mut CalendarSettings) {
+fn calendar_selector(ui: &mut egui::Ui, settings: &mut Settings) {
+    let specs = computed_specs(settings);
+    let cs = &mut settings.calendar;
+    let spec = specs.iter().find(|s| s.id() == cs.calendar_id).cloned();
     let info = selected_info(&cs.calendar_id);
-    if info.id != cs.calendar_id {
+    if spec.is_none() && info.id != cs.calendar_id {
         cs.calendar_id = info.id.to_owned();
     }
+    let selected_name = spec
+        .as_ref()
+        .map_or(info.name.to_owned(), ComputedSpec::name);
     ui.horizontal(|ui| {
         ui.label("Calendar:");
         egui::ComboBox::from_id_salt("hijri_calendar")
-            .selected_text(info.name)
-            .width(280.0)
+            .selected_text(selected_name)
+            .width(320.0)
             .show_ui(ui, |ui| {
                 for c in calendars() {
                     ui.selectable_value(&mut cs.calendar_id, c.id.to_owned(), c.name)
                         .on_hover_text(c.description);
                 }
                 ui.separator();
-                ui.add_enabled(
-                    false,
-                    egui::Button::selectable(false, "Visibility-based (coming soon)"),
-                )
-                .on_disabled_hover_text(
-                    "Month starts predicted from crescent visibility at the observer's \
-                         location under the selected criterion.",
-                );
+                ui.weak("Computed with the ephemeris:");
+                for s in &specs {
+                    let label = match s {
+                        ComputedSpec::Visibility { .. } => "Visibility-based (crescent sighting)",
+                        ComputedSpec::Rule(r) => r.name(),
+                    };
+                    ui.selectable_value(&mut cs.calendar_id, s.id().to_owned(), label)
+                        .on_hover_text(s.description());
+                }
             });
     });
-    let info = selected_info(&cs.calendar_id);
-    ui.add(egui::Label::new(info.description).wrap());
-    if let Some(credit) = info.attribution {
-        ui.add(egui::Label::new(egui::RichText::new(credit).small().weak()).wrap());
+    match specs.iter().find(|s| s.id() == cs.calendar_id) {
+        Some(spec) => {
+            ui.add(egui::Label::new(spec.description()).wrap());
+            match spec {
+                ComputedSpec::Visibility { .. } => {
+                    visibility_settings(ui, &mut cs.visibility, &settings.location);
+                }
+                ComputedSpec::Rule(r) => {
+                    ui.add(
+                        egui::Label::new(egui::RichText::new(r.reference()).small().weak()).wrap(),
+                    );
+                }
+            }
+        }
+        None => {
+            let info = selected_info(&cs.calendar_id);
+            ui.add(egui::Label::new(info.description).wrap());
+            if let Some(credit) = info.attribution {
+                ui.add(egui::Label::new(egui::RichText::new(credit).small().weak()).wrap());
+            }
+        }
     }
+}
+
+/// The settings of the visibility-based calendar: criterion, threshold
+/// zone, and where the crescent is looked for.
+fn visibility_settings(
+    ui: &mut egui::Ui,
+    vs: &mut VisibilityCalendarSettings,
+    location: &LocationSettings,
+) {
+    let criteria = mooncalc_visibility::criteria::all();
+    if !criteria.iter().any(|c| c.id() == vs.criterion_id)
+        && let Some(first) = criteria.first()
+    {
+        vs.criterion_id = first.id().to_owned();
+    }
+    ui.horizontal_wrapped(|ui| {
+        ui.label("Criterion:");
+        let current = criteria.iter().find(|c| c.id() == vs.criterion_id);
+        egui::ComboBox::from_id_salt("hijri_visibility_criterion")
+            .selected_text(current.map_or("—", |c| c.name()))
+            .show_ui(ui, |ui| {
+                for c in &criteria {
+                    ui.selectable_value(&mut vs.criterion_id, c.id().to_owned(), c.name())
+                        .on_hover_text(c.reference());
+                }
+            });
+        if let Some(c) = criteria.iter().find(|c| c.id() == vs.criterion_id) {
+            // Every zone but the last ("not visible") can be the threshold.
+            let zones = c.zones();
+            let choices = zones.len().saturating_sub(1).max(1);
+            vs.max_zone = vs.max_zone.min(choices - 1);
+            ui.label("Seen at:");
+            egui::ComboBox::from_id_salt("hijri_visibility_zone")
+                .selected_text(format!("zone {} or better", zones[vs.max_zone].code))
+                .show_ui(ui, |ui| {
+                    for (i, z) in zones.iter().take(choices).enumerate() {
+                        ui.selectable_value(
+                            &mut vs.max_zone,
+                            i,
+                            format!("{}: {}", z.code, z.description),
+                        );
+                    }
+                });
+        }
+    });
+    ui.horizontal_wrapped(|ui| {
+        ui.label("Where:");
+        let mut options = vec![
+            (
+                OBSERVERS_APP_LOCATION.to_owned(),
+                format!("Observer location ({})", location.name),
+            ),
+            (OBSERVERS_MECCA.to_owned(), "Mecca".to_owned()),
+        ];
+        options.extend(
+            RegionPreset::ALL
+                .iter()
+                .map(|r| (r.id().to_owned(), format!("Anywhere: {}", r.name()))),
+        );
+        if !options.iter().any(|(id, _)| *id == vs.observers) {
+            vs.observers = OBSERVERS_APP_LOCATION.to_owned();
+        }
+        let current = options
+            .iter()
+            .find(|(id, _)| *id == vs.observers)
+            .map_or(String::new(), |(_, name)| name.clone());
+        egui::ComboBox::from_id_salt("hijri_visibility_where")
+            .selected_text(current)
+            .show_ui(ui, |ui| {
+                for (id, name) in &options {
+                    ui.selectable_value(&mut vs.observers, id.clone(), name);
+                }
+            });
+        if RegionPreset::from_id(&vs.observers).is_some() {
+            ui.label("Grid:");
+            ui.add(
+                egui::DragValue::new(&mut vs.grid_step_deg)
+                    .range(2.0..=20.0)
+                    .speed(0.1)
+                    .max_decimals(1)
+                    .suffix("°"),
+            )
+            .on_hover_text(
+                "Spacing of the sample points in the region. Each point is a sea-level \
+                 observer on its own local evening; the month starts when the crescent is \
+                 seen at any of them. Finer grids are slower.",
+            );
+        }
+    });
 }
 
 /// Draw a month grid. Returns the day clicked, if any.
@@ -933,6 +1693,12 @@ mod tests {
             calendar_id: "tabular-3-civil".into(),
             primary: PrimaryCalendar::Gregorian,
             week_start: WeekStart::Monday,
+            visibility: VisibilityCalendarSettings {
+                criterion_id: "odeh".into(),
+                max_zone: 2,
+                observers: "americas".into(),
+                grid_step_deg: 4.0,
+            },
         };
         let back: CalendarSettings =
             serde_json::from_str(&serde_json::to_string(&s).unwrap()).unwrap();
@@ -940,6 +1706,128 @@ mod tests {
         let partial: CalendarSettings = serde_json::from_str(r#"{"primary":"Gregorian"}"#).unwrap();
         assert_eq!(partial.calendar_id, DEFAULT_CALENDAR_ID);
         assert_eq!(partial.primary, PrimaryCalendar::Gregorian);
+        assert_eq!(partial.visibility, VisibilityCalendarSettings::default());
+    }
+
+    #[test]
+    fn computed_specs_and_keys() {
+        let mut settings = Settings::default();
+        let specs = computed_specs(&settings);
+        assert_eq!(specs.len(), 1 + RuleCalendar::ALL.len());
+        assert!(specs.iter().all(|s| is_computed_id(s.id())));
+        assert!(!is_computed_id(DEFAULT_CALENDAR_ID));
+        let v = &specs[0];
+        assert_eq!(v.id(), VISIBILITY_ID);
+        assert!(v.name().contains("≤ B"), "{}", v.name());
+        let key = v.key(settings.backend, "");
+        // Moving the observer changes the visibility calendar, not the rules.
+        settings.location.lat_deg += 1.0;
+        let moved = computed_specs(&settings);
+        assert_ne!(moved[0].key(settings.backend, ""), key);
+        assert_eq!(
+            moved[1].key(settings.backend, ""),
+            specs[1].key(settings.backend, "")
+        );
+        // A region ignores the observer location.
+        settings.calendar.visibility.observers = RegionPreset::AsiaPacific.id().into();
+        let region = ComputedSpec::visibility(&settings.calendar.visibility, &settings.location);
+        assert!(matches!(
+            region,
+            ComputedSpec::Visibility {
+                observers: Observers::Region { .. },
+                ..
+            }
+        ));
+        assert!(region.name().contains("Asia"));
+        // An unknown observer id falls back to the observer location.
+        settings.calendar.visibility.observers = "atlantis".into();
+        let back = ComputedSpec::visibility(&settings.calendar.visibility, &settings.location);
+        assert!(matches!(
+            back,
+            ComputedSpec::Visibility {
+                observers: Observers::Place(_),
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn computes_a_year_in_the_background() {
+        // The job function on the calling thread: the Umm al-Qura rule for
+        // 1445 AH, then shown through a `KnownStarts` calendar.
+        let engine = Engine::default();
+        let spec = ComputedSpec::Rule(RuleCalendar::UmmAlQuraRule);
+        let req = YearRequest {
+            key: spec.key(BackendChoice::Meeus, ""),
+            spec: spec.clone(),
+            year: 1445,
+        };
+        let out = compute_batch(
+            &engine,
+            BackendChoice::Meeus,
+            "",
+            std::slice::from_ref(&req),
+            &JobContext::detached(),
+        )
+        .unwrap();
+        assert_eq!(out.len(), 1);
+        let (key, year, starts) = out.into_iter().next().unwrap();
+        assert_eq!((key.as_str(), year), (req.key.as_str(), 1445));
+        assert_eq!(starts.len(), 13);
+        let mut c = Computed::default();
+        c.add(year, starts, &spec);
+        let cal = c.calendar.unwrap();
+        assert_eq!(cal.supported_range().first_year, 1445);
+        // 1 Ramaḍān 1445 = 11 March 2024 under both the rule and the table.
+        assert_eq!(cal.month_start(1445, 9), Some(jdn(2024, 3, 11)));
+        assert_eq!(
+            cal.to_hijri(jdn(2024, 3, 20)),
+            Some(HijriDate::new(1445, 9, 10))
+        );
+        assert_eq!(cal.year_length(1445), UMM_AL_QURA.year_length(1445));
+        assert_eq!(cal.to_hijri(jdn(2030, 1, 1)), None);
+        // The provider is cached for the next job.
+        assert_eq!(engine.lock_providers().len(), 1);
+    }
+
+    #[test]
+    fn active_calendar_switches_to_computed() {
+        let mut tab = CalendarTab::default();
+        let mut settings = Settings::default();
+        assert!(matches!(
+            tab.active_calendar(&settings),
+            ActiveCalendar::Builtin(_)
+        ));
+        settings.calendar.calendar_id = RuleCalendar::ConjunctionBeforeNoonUt.id().into();
+        let empty = tab.active_calendar(&settings);
+        let ActiveCalendar::Computed(cal) = &empty else {
+            panic!("expected a computed calendar")
+        };
+        assert_eq!(cal.to_hijri(jdn(2024, 3, 20)), None);
+        // Requests: every computed calendar for the years on screen, the
+        // selected calendar first.
+        tab.wanted_years = vec![1445, 1446];
+        let missing = tab.missing(&settings);
+        assert_eq!(missing.len(), 2 * computed_specs(&settings).len());
+        assert_eq!(
+            missing[0].spec.id(),
+            RuleCalendar::ConjunctionBeforeNoonUt.id()
+        );
+        assert_eq!(missing[1].year, 1446);
+        // Once a year is in, it is no longer requested and is shown.
+        let spec = missing[0].spec.clone();
+        let starts = (0..13)
+            .map(|i| (month_index(1445, 1) + i, jdn(2023, 7, 19) + 29 * i + i / 2))
+            .collect();
+        tab.computed
+            .entry(missing[0].key.clone())
+            .or_default()
+            .add(1445, starts, &spec);
+        assert_eq!(tab.missing(&settings).len(), missing.len() - 1);
+        let ActiveCalendar::Computed(cal) = tab.active_calendar(&settings) else {
+            panic!()
+        };
+        assert_eq!(cal.month_start(1445, 1), Some(jdn(2023, 7, 19)));
     }
 
     #[test]
