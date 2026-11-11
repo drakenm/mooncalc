@@ -7,5 +7,6 @@
 | [Atlas data](../tools/atlas/README.md) | GeoNames conversion, embedded atlas format and selection rules. |
 | [Hijri data](../tools/hijri/README.md) | Umm al-Qura table sources, checksums and regeneration. |
 | [Validation](validation.md) | Reference datasets in `tests/fixtures/` (sources, licences, units, time scales), how `tools/fixtures/` regenerates them, and suggested test tolerances. |
+| [Follow-ups](planning/follow-ups.md) | Deferred work and known limits, until GitHub issues can be filed. |
 
 Agent workflow rules are in [AGENTS.md](../AGENTS.md).

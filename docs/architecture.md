@@ -42,7 +42,7 @@ Set out in the `mooncalc-core` crate docs and binding on every crate:
 ## Ephemeris backends
 
 - **Default:** Meeus, *Astronomical Algorithms* (2nd ed.). The Sun uses VSOP87 (truncated, ch. 25/32 or a fuller VSOP87D series), the Moon ELP-2000/82 (ch. 47). No data files are needed.
-- **`de440` feature:** reads a user-supplied DE440 or DE440s `.bsp` file at runtime and applies light time, aberration, precession (IAU 2006) and nutation to reach apparent geocentric positions. It implements the same trait, so everything downstream is backend-agnostic.
+- **`de440` feature:** `De440Ephemeris` reads a user-supplied DE440 or DE440s `.bsp` file at runtime. It reaches apparent geocentric positions through iterated light time, relativistic aberration, and the frame bias × IAU 2006 precession × IAU 1980 nutation rotation (`FrameModel::Iau2006`, the default; `FrameModel::Iau1976` is also available). It implements the same trait, so everything downstream is backend-agnostic. The core's GAST uses GMST 1982, which differs from the IAU 2006 equinox by at most 0.42″ over 1850–2150. That is negligible for visibility, and `de440::sidereal_time_offset` corrects it when needed.
 
 ## Work packages
 
