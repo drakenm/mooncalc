@@ -9,7 +9,7 @@ MoonCalc-rs is a Rust rewrite of Dr. Monzur Ahmed's MoonCalc 6.0, a closed-sourc
 | `mooncalc-core` | Time scales (JD, ΔT, sidereal time), precession/nutation, frame transforms, topocentric parallax, refraction, the `Ephemeris` trait and the default Meeus/ELP backend. Later: rise/set/transit, phases, conjunctions, apogee/perigee, eclipses, libration. |
 | `mooncalc-visibility` | `CrescentGeometry` (ARCL, ARCV, DAZ, W, lag, age ...), its computation from an ephemeris at the right evaluation time, and every sighting criterion as a pure function. |
 | `mooncalc-maps` | Visibility grid evaluation, projections, embedded Natural Earth base map, raster (egui texture / PNG) and SVG rendering. |
-| `mooncalc-hijri` | Tabular Islamic calendars, Umm al-Qura, and visibility-based calendars (fed month starts by the visibility engine). |
+| `mooncalc-hijri` | Tabular Islamic calendars, Umm al-Qura, and the calendar logic for observed and rule-based months (`ObservedCalendar`, the 29th-day recurrence). The month starts themselves come from `mooncalc-visibility::calendar`. |
 | `mooncalc-atlas` | Embedded GeoNames city atlas with search. |
 | `mooncalc-spk` | JPL SPK/DAF reader and the DE440 `Ephemeris` backend. Only compiled into the GUI with `--features de440`. |
 | `mooncalc-gui` | The egui/eframe desktop app, binary `mooncalc`. |
@@ -17,7 +17,7 @@ MoonCalc-rs is a Rust rewrite of Dr. Monzur Ahmed's MoonCalc 6.0, a closed-sourc
 | `mooncalc-app` (wave 2) | Application services shared by every frontend: high-level operations such as "compute visibility map", "location report" and "ephemeris table", returning serde DTOs. egui, Tauri and WASM all call this layer, so no logic is duplicated. |
 | `mooncalc-wasm` (planned release) | `wasm-bindgen` bindings over `mooncalc-app` for a browser TypeScript frontend in `frontend/web/`. |
 
-Dependency direction: `core` ← `visibility` ← `maps`, and `core` ← `hijri`, `atlas`, `spk`. The frontends (`gui`, `tauri`, later `wasm`) depend on everything. Library crates never depend on egui or Tauri.
+Dependency direction: `core` ← `visibility` ← `maps`, `core` ← `hijri` ← `visibility` (its `calendar` module), and `core` ← `atlas`, `spk`. The frontends (`gui`, `tauri`, later `wasm`) depend on everything. Library crates never depend on egui or Tauri.
 
 ## Frontends
 
