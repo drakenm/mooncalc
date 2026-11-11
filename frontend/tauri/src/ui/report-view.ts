@@ -158,7 +158,9 @@ export class ReportView {
           [evening ? 'Sunset' : 'Sunrise', t(c.sunEvent)],
           [evening ? 'Moonset' : 'Moonrise', t(c.moonEvent)],
           ['Lag', formatNumber(g?.lagMinutes, 0, ' min')],
-          ['Best time', t(c.bestTime)],
+          c.geometryAtSunEvent
+            ? [`Evaluated at ${evening ? 'sunset' : 'sunrise'}`, t(c.geometryAt)]
+            : ['Best time', t(c.bestTime)],
           ['Conjunction', t(c.conjunction)],
           [evening ? 'Moon age' : 'Time to conjunction', formatNumber(g?.ageHours, 2, ' h')],
           ['Illumination', formatNumber(g ? g.illuminatedFraction * 100 : null, 2, ' %')],
