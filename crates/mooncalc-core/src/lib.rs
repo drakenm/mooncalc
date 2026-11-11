@@ -30,12 +30,17 @@ pub mod angle;
 pub mod coords;
 pub mod deltat;
 pub mod ephemeris;
+pub mod illumination;
 pub mod matrix;
 pub mod nutation;
 pub mod precession;
+pub mod refraction;
 pub mod time;
+pub mod topocentric;
+pub mod transform;
 
 pub use coords::{Ecliptic, Equatorial, GeoLocation, Horizontal};
 pub use ephemeris::Ephemeris;
 pub use nutation::NutationObliquity;
+pub use refraction::Atmosphere;
 pub use time::{CalendarDateTime, Instant, Weekday};
