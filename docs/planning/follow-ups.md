@@ -35,3 +35,6 @@ GitHub issues can't be filed from this environment yet: the `gh` CLI is authenti
 | tauri | Map evaluation scales about 6x on 24 threads (0.25° world grid, measured while other builds ran); profile per-cell cost and thread scaling on an idle machine. | app services |
 | fixtures | Odeh Table VI is missing 159 naked-eye rows (V > 8.18). ICOP records weren't extractable. | validation |
 | licensing | Confirm that committing the Yallop (Crown copyright) and Odeh (Springer) tables as test data is acceptable before the repository goes public. | validation |
+| ci | Require the `ci-required` check in branch protection for `master` and `release/v*` (repository settings; `gh` here has no access to the repository). | ci |
+| ci | AGENTS.md's release flow refers to a Release workflow that deploys to staging and production. None exists yet, so `ci.yml` only checks. | ci |
+| ci | The nightly DE440 workflow runs only once `.github/workflows/de440.yml` is on the GitHub default branch (`master` or `main`). Until then, start it manually. | ci |
