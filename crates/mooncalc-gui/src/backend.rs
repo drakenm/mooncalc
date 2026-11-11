@@ -139,6 +139,52 @@ impl ActiveEphemeris {
         })
     }
 
+    /// `Some(message)` when the data a view needs for the UT span
+    /// `[start, end]` lies (partly) outside the ephemeris coverage. The view
+    /// also looks `before` days back and `after` days ahead (interpolation
+    /// tables, searches for the previous new Moon, the next phase ...).
+    ///
+    /// The message says whether the span itself is outside, or only the
+    /// margin (the date is too close to the edge of the coverage for this
+    /// view).
+    pub fn span_problem(&self, start: f64, end: f64, before: f64, after: f64) -> Option<String> {
+        let (a, b) = self.eph.valid_range();
+        // Valid ranges are TT; TT − UT is at most minutes inside DE440's
+        // span, well within the margins callers pass.
+        if start - before >= a && end + after <= b {
+            return None;
+        }
+        let what = if (end - start).abs() < 1.0 {
+            format_jd_date(start)
+        } else {
+            format!("{} to {}", format_jd_date(start), format_jd_date(end))
+        };
+        let backend = self.used.short_label();
+        let coverage = self.coverage_text();
+        Some(if start >= a && end <= b {
+            format!(
+                "{what} is too close to the edge of the {backend} coverage ({coverage}): this                  view needs ephemeris data from {} to {}",
+                format_jd_date(start - before),
+                format_jd_date(end + after)
+            )
+        } else {
+            format!("{what} is outside the {backend} coverage ({coverage})")
+        })
+    }
+
+    /// Whether the UT span `[start, end]` lies entirely inside the coverage.
+    pub fn covers(&self, start: f64, end: f64) -> bool {
+        let (a, b) = self.eph.valid_range();
+        start >= a && end <= b
+    }
+
+    /// Whether any part of the UT span `[start, end]` lies inside the
+    /// coverage.
+    pub fn overlaps(&self, start: f64, end: f64) -> bool {
+        let (a, b) = self.eph.valid_range();
+        end >= a && start <= b
+    }
+
     /// One-line description for the status bar.
     pub fn status_text(&self) -> String {
         let mut s = format!("Ephemeris: {}", self.used.short_label());
@@ -305,5 +351,59 @@ mod tests {
         assert!(create_ephemeris(BackendChoice::Meeus, "").is_ok());
         assert!(m.coverage_problem(2_460_000.5, 2.0).is_none());
         assert!(m.coverage_problem(1.0e9, 2.0).is_some());
+    }
+
+    /// A Meeus ephemeris claiming a short coverage, like a DE440s file.
+    struct Short;
+
+    impl mooncalc_core::Ephemeris for Short {
+        fn name(&self) -> &str {
+            "short"
+        }
+        fn valid_range(&self) -> (f64, f64) {
+            // 2000-01-01 to 2000-12-31 (TT, 0h).
+            (2_451_544.5, 2_451_909.5)
+        }
+        fn sun_equatorial(&self, t: f64) -> mooncalc_core::Equatorial {
+            MeeusEphemeris::new().sun_equatorial(t)
+        }
+        fn moon_equatorial(&self, t: f64) -> mooncalc_core::Equatorial {
+            MeeusEphemeris::new().moon_equatorial(t)
+        }
+        fn sun_ecliptic(&self, t: f64) -> mooncalc_core::Ecliptic {
+            MeeusEphemeris::new().sun_ecliptic(t)
+        }
+        fn moon_ecliptic(&self, t: f64) -> mooncalc_core::Ecliptic {
+            MeeusEphemeris::new().moon_ecliptic(t)
+        }
+    }
+
+    #[test]
+    fn span_problems_distinguish_outside_from_too_close() {
+        let a = ActiveEphemeris {
+            eph: Arc::new(Short),
+            used: BackendChoice::De440,
+            notice: None,
+        };
+        let mid = 2_451_700.5; // 2000-06-05
+        assert!(a.span_problem(mid, mid + 10.0, 31.0, 31.0).is_none());
+        assert!(a.covers(mid, mid + 10.0));
+        let edge = 2_451_900.5; // 2000-12-22
+        let msg = a.span_problem(edge, edge, 31.0, 31.0).unwrap();
+        assert!(msg.contains("too close to the edge"), "{msg}");
+        assert!(msg.contains("2000-12-22"), "{msg}");
+        let outside = 2_452_000.5; // 2001-04-01
+        let msg = a.span_problem(outside, outside, 0.0, 0.0).unwrap();
+        assert!(
+            msg.starts_with("2001-04-01 is outside the JPL DE440 coverage"),
+            "{msg}"
+        );
+        let msg = a.span_problem(mid, outside, 0.0, 0.0).unwrap();
+        assert!(
+            msg.starts_with("2000-06-05 to 2001-04-01 is outside"),
+            "{msg}"
+        );
+        assert!(a.overlaps(mid, outside) && !a.covers(mid, outside));
+        assert!(!a.overlaps(outside, outside + 1.0));
     }
 }

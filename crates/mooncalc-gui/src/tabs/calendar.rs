@@ -453,6 +453,105 @@ type BatchResult = Vec<(String, i32, Vec<(i64, i64)>)>;
 /// little when replaced.
 const BATCH_SIZE: usize = 4;
 
+/// Days before a month start whose ephemeris data the start depends on:
+/// the conjunction (up to two days earlier), the evening tests from the day
+/// before it, and each evening's searches (±1.75 d around local noon, which
+/// is up to half a day from UT noon).
+const START_MARGIN_BEFORE: f64 = 5.0;
+/// Days after a month start whose data it depends on (its eve's searches).
+const START_MARGIN_AFTER: f64 = 3.0;
+/// Largest difference between the tabular estimate of a month start and
+/// a computed one, days.
+const TABULAR_ERROR_DAYS: i64 = 3;
+
+/// Whether the ephemeris covers everything the month starting on civil day
+/// `jdn` depends on. Starts too close to (or beyond) the edges of the
+/// coverage are dropped rather than shown wrong: outside it the evening
+/// tests see no crescent, which would silently lengthen months.
+fn start_covered(eph: &dyn Ephemeris, jdn: i64) -> bool {
+    let (a, b) = eph.valid_range();
+    let jd = jdn as f64;
+    jd - START_MARGIN_BEFORE >= a && jd + START_MARGIN_AFTER <= b
+}
+
+/// Whether a month whose tabular start is `estimate` may start inside the
+/// coverage (otherwise it is not computed at all).
+fn estimate_covered(eph: &dyn Ephemeris, estimate: i64) -> bool {
+    start_covered(eph, estimate - TABULAR_ERROR_DAYS)
+        || start_covered(eph, estimate + TABULAR_ERROR_DAYS)
+}
+
+/// How much of a Hijri year the ephemeris covers.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum YearCoverage {
+    Full,
+    Partial,
+    Outside,
+}
+
+/// The coverage of Hijri `year`, from the tabular estimate of its months.
+fn hijri_year_coverage(eph: &dyn Ephemeris, year: i32) -> YearCoverage {
+    let starts: Vec<i64> = (1..=12)
+        .filter_map(|m| TABULAR_II_CIVIL.month_start(year, m))
+        .collect();
+    let covered = starts
+        .iter()
+        .filter(|&&s| {
+            start_covered(eph, s - TABULAR_ERROR_DAYS) && start_covered(eph, s + TABULAR_ERROR_DAYS)
+        })
+        .count();
+    if covered == starts.len() {
+        YearCoverage::Full
+    } else if starts.iter().any(|&s| estimate_covered(eph, s)) {
+        YearCoverage::Partial
+    } else {
+        YearCoverage::Outside
+    }
+}
+
+/// A sentence about the wanted Hijri years the ephemeris does not fully
+/// cover, if any.
+fn coverage_note(active: &backend::ActiveEphemeris, years: &[i32]) -> Option<String> {
+    let mut partial = Vec::new();
+    let mut outside = Vec::new();
+    let mut sorted = years.to_vec();
+    sorted.sort_unstable();
+    for y in sorted {
+        match hijri_year_coverage(active.eph.as_ref(), y) {
+            YearCoverage::Full => {}
+            YearCoverage::Partial => partial.push(y.to_string()),
+            YearCoverage::Outside => outside.push(y.to_string()),
+        }
+    }
+    if partial.is_empty() && outside.is_empty() {
+        return None;
+    }
+    let mut parts = Vec::new();
+    if !partial.is_empty() {
+        parts.push(format!(
+            "Hijri {} {} only partly inside",
+            if partial.len() == 1 { "year" } else { "years" },
+            partial.join(", ")
+        ));
+    }
+    if !outside.is_empty() {
+        parts.push(format!(
+            "{} {} outside",
+            if outside.len() == 1 { "year" } else { "years" },
+            outside.join(", ")
+        ));
+    }
+    Some(format!(
+        "Computed calendars: {} the {} coverage ({}). Months that start outside it or within \
+         a few days of its edges are not computed, nor, for the calendars decided on the \
+         29th day (visibility, Umm al-Qura rule), the months of the first Hijri year that \
+         starts inside it.",
+        parts.join("; "),
+        active.used.short_label(),
+        active.coverage_text()
+    ))
+}
+
 /// Compute a batch of years on a worker thread.
 fn compute_batch(
     engine: &Engine,
@@ -475,7 +574,13 @@ fn compute_batch(
         for (i, n) in (first..=first + 12).enumerate() {
             job.checkpoint()?;
             let (y, m) = month_from_index(n);
-            if let Some(jdn) = provider.month_start(y, m) {
+            // Skip months entirely outside the coverage; keep only starts
+            // whose data is all inside it.
+            let estimate = TABULAR_II_CIVIL.month_start(y, m);
+            if estimate.is_none_or(|e| estimate_covered(eph.as_ref(), e))
+                && let Some(jdn) = provider.month_start(y, m)
+                && start_covered(eph.as_ref(), jdn)
+            {
                 starts.push((n, jdn));
             }
             job.set_progress((b * 13 + i + 1) as f32 / total as f32);
@@ -772,6 +877,8 @@ pub struct CalendarTab {
     error: Option<String>,
     /// Hijri years on screen, most important first (set by `ui`).
     wanted_years: Vec<i32>,
+    /// Which wanted years the ephemeris does not cover (set by `poll`).
+    coverage_note: Option<String>,
 }
 
 impl CalendarTab {
@@ -892,6 +999,8 @@ impl CalendarTab {
         if let Some(progress) = self.job.progress() {
             tc.status.report_job(progress);
         }
+        let active = backend::resolve(tc.settings.backend, &tc.settings.de440_path);
+        self.coverage_note = coverage_note(&active, &self.wanted_years);
     }
 
     /// Remember which Hijri years are on screen, for [`Self::poll`].
@@ -933,6 +1042,13 @@ impl CalendarTab {
         self.wanted_years = years;
     }
 
+    /// Whether the ephemeris covers what a month starting on civil day `jdn`
+    /// depends on (see [`start_covered`]).
+    fn day_covered(&self, settings: &Settings, jdn: i64) -> bool {
+        let active = backend::resolve(settings.backend, &settings.de440_path);
+        start_covered(active.eph.as_ref(), jdn)
+    }
+
     /// Progress or problems of the computed calendars, for the selector.
     fn computed_status(&self, ui: &mut egui::Ui, cal: &dyn HijriCalendar) {
         if let Some(e) = &self.error {
@@ -963,8 +1079,12 @@ impl CalendarTab {
             calendar_selector(ui, tc.settings);
             let active = self.active_calendar(tc.settings);
             let cal = active.get();
-            if is_computed_id(&tc.settings.calendar.calendar_id) {
+            let computed = is_computed_id(&tc.settings.calendar.calendar_id);
+            if computed {
                 self.computed_status(ui, cal);
+            }
+            if let Some(note) = &self.coverage_note {
+                ui.colored_label(ui.visuals().warn_fg_color, format!("⚠ {note}"));
             }
             ui.add(egui::Label::new(egui::RichText::new(SUNSET_NOTE).small().weak()).wrap());
 
@@ -976,6 +1096,9 @@ impl CalendarTab {
                 let weekday = Weekday::from_jdn(selected).name_english();
                 match cal.to_hijri(selected) {
                     Some(h) => ui.strong(format_hijri(h, diacritics)),
+                    None if computed && !self.day_covered(tc.settings, selected) => {
+                        ui.weak("outside the ephemeris coverage")
+                    }
                     None => ui.weak(OUTSIDE_RANGE),
                 };
                 ui.label(format!("— {weekday} {} (local)", format_civil(civil)));
@@ -1781,6 +1904,103 @@ mod tests {
         assert_eq!(cal.to_hijri(jdn(2030, 1, 1)), None);
         // The provider is cached for the next job.
         assert_eq!(engine.lock_providers().len(), 1);
+    }
+
+    /// Meeus claiming coverage of 2022-06-01 to 2024-03-31 only (TT): from
+    /// before 1 Muharram 1444, which the chain of 1445 AH starts from.
+    struct HalfYear;
+
+    impl HalfYear {
+        fn ok(&self, t: f64) -> bool {
+            let (a, b) = self.valid_range();
+            (a..=b).contains(&t)
+        }
+    }
+
+    impl Ephemeris for HalfYear {
+        fn name(&self) -> &str {
+            "half year"
+        }
+        fn valid_range(&self) -> (f64, f64) {
+            (2_459_731.5, 2_460_400.5)
+        }
+        fn sun_equatorial(&self, t: f64) -> mooncalc_core::Equatorial {
+            let e = mooncalc_core::MeeusEphemeris::new().sun_equatorial(t);
+            if self.ok(t) { e } else { nan_equatorial() }
+        }
+        fn moon_equatorial(&self, t: f64) -> mooncalc_core::Equatorial {
+            let e = mooncalc_core::MeeusEphemeris::new().moon_equatorial(t);
+            if self.ok(t) { e } else { nan_equatorial() }
+        }
+        fn sun_ecliptic(&self, t: f64) -> mooncalc_core::Ecliptic {
+            let e = mooncalc_core::MeeusEphemeris::new().sun_ecliptic(t);
+            if self.ok(t) { e } else { nan_ecliptic() }
+        }
+        fn moon_ecliptic(&self, t: f64) -> mooncalc_core::Ecliptic {
+            let e = mooncalc_core::MeeusEphemeris::new().moon_ecliptic(t);
+            if self.ok(t) { e } else { nan_ecliptic() }
+        }
+    }
+
+    fn nan_equatorial() -> mooncalc_core::Equatorial {
+        mooncalc_core::Equatorial {
+            ra: f64::NAN,
+            dec: f64::NAN,
+            distance_km: f64::NAN,
+        }
+    }
+
+    fn nan_ecliptic() -> mooncalc_core::Ecliptic {
+        mooncalc_core::Ecliptic {
+            lon: f64::NAN,
+            lat: f64::NAN,
+            distance_km: f64::NAN,
+        }
+    }
+
+    #[test]
+    fn partly_covered_years_keep_only_covered_months() {
+        let eph: Arc<dyn Ephemeris> = Arc::new(HalfYear);
+        // 1445 AH runs from July 2023 to July 2024: partly covered. 1446 AH
+        // (from July 2024) is outside.
+        assert_eq!(
+            hijri_year_coverage(eph.as_ref(), 1445),
+            YearCoverage::Partial
+        );
+        assert_eq!(
+            hijri_year_coverage(eph.as_ref(), 1446),
+            YearCoverage::Outside
+        );
+        let active = backend::ActiveEphemeris {
+            eph: eph.clone(),
+            used: BackendChoice::De440,
+            notice: None,
+        };
+        let note = coverage_note(&active, &[1446, 1445]).unwrap();
+        assert!(note.contains("year 1445 only partly inside"), "{note}");
+        assert!(note.contains("year 1446 outside"), "{note}");
+        assert!(coverage_note(&active, &[]).is_none());
+
+        // The Umm al-Qura rule over the covered months agrees with the
+        // table; the months outside are left out, not lengthened.
+        let spec = ComputedSpec::Rule(RuleCalendar::UmmAlQuraRule);
+        let provider = spec.provider(eph.clone()).unwrap();
+        let first = month_index(1445, 1);
+        let mut kept = Vec::new();
+        for n in first..=first + 12 {
+            let (y, m) = month_from_index(n);
+            let estimate = TABULAR_II_CIVIL.month_start(y, m);
+            if estimate.is_none_or(|e| estimate_covered(eph.as_ref(), e))
+                && let Some(jdn) = provider.month_start(y, m)
+                && start_covered(eph.as_ref(), jdn)
+            {
+                assert_eq!(UMM_AL_QURA.month_start(y, m), Some(jdn), "{y}-{m}");
+                kept.push(m);
+            }
+        }
+        // Muharram (2023-07-19) to Ramadan (2024-03-11) start inside;
+        // Shawwal (2024-04-10) does not.
+        assert_eq!(kept, (1..=9).collect::<Vec<u8>>(), "{kept:?}");
     }
 
     #[test]

@@ -13,9 +13,12 @@ use serde::{Deserialize, Serialize};
 
 use super::cached::CachedJob;
 use super::format::{self, AngleStyle};
-use super::{EphKey, busy, ephemeris, error_line, set_app_time};
+use super::{
+    DAY_MARGIN, EphKey, LUNATION_MARGIN, busy, coverage, ephemeris, error_line, set_app_time,
+};
 use crate::jobs::parallel_rows;
 use crate::tabs::TabContext;
+use crate::widgets::coverage::coverage_notice;
 
 /// Largest table the UI will compute.
 pub const MAX_ROWS: usize = 200_000;
@@ -350,8 +353,22 @@ impl TableView {
         }
     }
 
+    /// The coverage problem of the requested rows: every row needs the
+    /// previous new Moon (its age column).
+    fn coverage(tc: &TabContext<'_>) -> Option<String> {
+        let r = Self::request(tc);
+        let end = r.start_jd_ut + r.step_days * (r.count.saturating_sub(1)) as f64;
+        coverage(
+            tc.settings,
+            r.start_jd_ut.min(end),
+            r.start_jd_ut.max(end),
+            LUNATION_MARGIN,
+            DAY_MARGIN,
+        )
+    }
+
     pub fn poll(&mut self, ctx: &egui::Context, tc: &mut TabContext<'_>, visible: bool) {
-        if visible {
+        if visible && Self::coverage(tc).is_none() {
             let req = Self::request(tc);
             let eph = ephemeris(tc.settings);
             self.job
@@ -379,6 +396,10 @@ impl TableView {
     pub fn ui(&mut self, ui: &mut egui::Ui, tc: &mut TabContext<'_>) {
         let tz = tc.settings.time.tz_offset_hours;
         self.controls(ui, tc, tz);
+        if let Some(problem) = Self::coverage(tc) {
+            coverage_notice(ui, &problem);
+            return;
+        }
         error_line(ui, &self.job.error);
         busy(ui, self.job.is_running());
 

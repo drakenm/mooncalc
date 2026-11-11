@@ -1,5 +1,7 @@
 //! A background job keyed by its request: recompute when the request
-//! changes, keep the last result, report progress to the status bar.
+//! changes (cancelling the previous job), keep the last result, report
+//! progress to the status bar. Used by the Ephemeris sub-views and by the
+//! Sky and Trajectory scenes.
 
 use crate::jobs::{JobContext, JobError, JobSlot};
 use crate::status::StatusInfo;
@@ -12,6 +14,8 @@ pub struct CachedJob<R, T> {
     pub value: Option<(R, T)>,
     pub error: Option<String>,
     pending: Option<R>,
+    /// Label of the last request, for error messages.
+    label: String,
 }
 
 impl<R, T> Default for CachedJob<R, T> {
@@ -22,6 +26,7 @@ impl<R, T> Default for CachedJob<R, T> {
             value: None,
             error: None,
             pending: None,
+            label: String::new(),
         }
     }
 }
@@ -41,6 +46,7 @@ where
         }
         self.requested = Some(req.clone());
         self.pending = Some(req.clone());
+        label.clone_into(&mut self.label);
         let repaint = ctx.clone();
         self.slot.submit(
             label,
@@ -60,7 +66,7 @@ where
             }
             Some(Err(e)) => {
                 self.pending = None;
-                status.error(format!("Ephemeris: {e}"));
+                status.error(format!("{}: {e}", self.label));
                 self.error = Some(e);
             }
             None => {}

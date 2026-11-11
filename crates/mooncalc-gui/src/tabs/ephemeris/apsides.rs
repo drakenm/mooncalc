@@ -16,7 +16,9 @@ use super::{
     EphKey, app_year, busy, ephemeris, error_line, set_app_time, time_link, year_bounds,
     year_picker,
 };
+use super::{LUNATION_MARGIN, year_coverage};
 use crate::tabs::TabContext;
+use crate::widgets::coverage::coverage_notice;
 
 /// The events of one year.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -41,8 +43,14 @@ pub struct ApsidesView {
 }
 
 impl ApsidesView {
+    /// The searches bracket events up to half a month beyond the year.
+    fn coverage(&self, tc: &TabContext<'_>) -> Option<String> {
+        let year = self.year.unwrap_or(app_year(tc.settings));
+        year_coverage(tc.settings, year, LUNATION_MARGIN)
+    }
+
     pub fn poll(&mut self, ctx: &egui::Context, tc: &mut TabContext<'_>, visible: bool) {
-        if visible {
+        if visible && self.coverage(tc).is_none() {
             let req = Request {
                 year: self.year.unwrap_or(app_year(tc.settings)),
                 tz: tc.settings.time.tz_offset_hours,
@@ -77,6 +85,10 @@ impl ApsidesView {
         ui.horizontal_wrapped(|ui| {
             year_picker(ui, &mut self.year, app_year(tc.settings));
         });
+        if let Some(problem) = self.coverage(tc) {
+            coverage_notice(ui, &problem);
+            return;
+        }
         error_line(ui, &self.job.error);
         busy(ui, self.job.is_running());
         let Some(ev) = self.job.get() else {

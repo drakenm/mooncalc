@@ -20,6 +20,8 @@ use crate::tabs::calendar::CalendarSettings;
 use crate::tabs::ephemeris::EphemerisSettings;
 use crate::tabs::map::MapSettings;
 use crate::tabs::moon::MoonSettings;
+use crate::tabs::sky::SkySettings;
+use crate::tabs::trajectory::TrajectorySettings;
 
 /// eframe storage key for [`Settings`].
 pub const SETTINGS_KEY: &str = "mooncalc.settings";
@@ -45,6 +47,10 @@ pub struct Settings {
     pub moon_tab: MoonSettings,
     /// Map-tab display options (resolution, projection, layers, export).
     pub map: MapSettings,
+    /// Sky-tab view options (view, zoom, disc scale, layers, speed).
+    pub sky_tab: SkySettings,
+    /// Trajectory-tab options (live mode).
+    pub trajectory_tab: TrajectorySettings,
 }
 
 impl Default for Settings {
@@ -61,6 +67,8 @@ impl Default for Settings {
             ephemeris_tab: EphemerisSettings::default(),
             moon_tab: MoonSettings::default(),
             map: MapSettings::default(),
+            sky_tab: SkySettings::default(),
+            trajectory_tab: TrajectorySettings::default(),
         }
     }
 }
@@ -288,6 +296,13 @@ mod tests {
                 cities: true,
                 ..MapSettings::default()
             },
+            sky_tab: SkySettings {
+                view: crate::tabs::sky::SkyView::StarChart,
+                span_deg: 45.0,
+                show_stars: false,
+                ..SkySettings::default()
+            },
+            trajectory_tab: TrajectorySettings { live: true },
         }
     }
 
@@ -308,6 +323,10 @@ mod tests {
         assert_eq!(back.view.active_tab, Tab::Map);
         assert_eq!(back.location, LocationSettings::default());
         assert!(back.time.start_at_now);
+        // Tab options added later load with their defaults.
+        assert_eq!(back.sky_tab, SkySettings::default());
+        assert_eq!(back.trajectory_tab, TrajectorySettings::default());
+        assert_eq!(back.ephemeris_tab, EphemerisSettings::default());
     }
 
     #[test]

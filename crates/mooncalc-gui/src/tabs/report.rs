@@ -274,6 +274,10 @@ pub fn outcome_text(o: &Outcome, s: Sighting) -> (String, Tone) {
             "The Sun does not reach the criterion's evaluation altitude within 12 hours.".into(),
             Tone::Warn,
         ),
+        Outcome::OutsideEphemeris => (
+            "Not computed: the date is outside the ephemeris coverage.".into(),
+            Tone::Warn,
+        ),
     }
 }
 
@@ -291,6 +295,7 @@ fn no_verdict_reason(o: &Outcome, s: Sighting) -> &'static str {
         Outcome::NoSunEvent(Polar::MidnightSun) => "polar day",
         Outcome::NoSunEvent(Polar::PolarNight) => "polar night",
         Outcome::SunAltitudeNotReached { .. } => "Sun altitude not reached",
+        Outcome::OutsideEphemeris => "outside ephemeris",
     }
 }
 

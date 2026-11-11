@@ -22,7 +22,8 @@ use serde::{Deserialize, Serialize};
 
 use super::TabContext;
 use super::ephemeris::format::{self, AngleStyle};
-use super::ephemeris::{EphKey, ephemeris, set_app_time, time_link};
+use super::ephemeris::{EphKey, LUNATION_MARGIN, ephemeris, set_app_time, time_link};
+use crate::widgets::coverage::coverage_notice;
 
 pub mod disc;
 pub mod libration_graph;
@@ -79,6 +80,10 @@ struct MoonState {
     /// Elongation in longitude, radians.
     elong_lon: f64,
     crater: Option<CraterEvents>,
+    /// Whether the ephemeris covers the lunation around the instant: the
+    /// age, the libration curve and the crater's next sunrise and sunset
+    /// need the new Moons and events up to a month away.
+    lunation_covered: bool,
 }
 
 struct CraterEvents {
@@ -113,7 +118,7 @@ pub struct MoonTab {
 }
 
 impl MoonTab {
-    fn update(&mut self, tc: &TabContext<'_>, eph: &dyn Ephemeris) {
+    fn update(&mut self, tc: &TabContext<'_>, eph: &dyn Ephemeris, lunation_covered: bool) {
         let s = &*tc.settings;
         let l = &s.location;
         let key = StateKey {
@@ -142,6 +147,7 @@ impl MoonTab {
         let elong_lon = row.moon.ecliptic.lon - row.sun.ecliptic.lon;
         let crater = features::CRATERS
             .iter()
+            .filter(|_| lunation_covered)
             .find(|c| c.name == key.crater)
             .map(|c| {
                 let (eta, theta) = (c.lon * DEG, c.lat * DEG);
@@ -155,7 +161,10 @@ impl MoonTab {
                         .map(Instant::from_jd_tt),
                 }
             });
-        if !self.curve.as_ref().is_some_and(|c| c.contains(instant)) {
+        if !lunation_covered {
+            // Its new Moons would be NaN, and `contains` never true.
+            self.curve = None;
+        } else if !self.curve.as_ref().is_some_and(|c| c.contains(instant)) {
             self.curve = Some(libration_graph::LunationCurve::around(eph, instant));
         }
         self.state = Some((
@@ -165,13 +174,25 @@ impl MoonTab {
                 q,
                 elong_lon,
                 crater,
+                lunation_covered,
             },
         ));
     }
 
     pub fn ui(&mut self, ui: &mut egui::Ui, tc: &mut TabContext<'_>) {
+        let active = crate::backend::resolve(tc.settings.backend, &tc.settings.de440_path);
+        let jd = tc.settings.time.jd_ut;
+        // The row needs the instant (and light time); a day either side.
+        if let Some(problem) = active.span_problem(jd, jd, 1.0, 1.0) {
+            ui.heading("Moon close-up");
+            coverage_notice(ui, &problem);
+            return;
+        }
+        let lunation_covered = active
+            .span_problem(jd, jd, LUNATION_MARGIN, LUNATION_MARGIN)
+            .is_none();
         let eph = ephemeris(tc.settings);
-        self.update(tc, eph.as_ref());
+        self.update(tc, eph.as_ref(), lunation_covered);
         let Some((_, st)) = self.state.as_ref() else {
             return;
         };
@@ -226,6 +247,11 @@ impl MoonTab {
                     clicked = crater_ui(ui, st, tc);
                     ui.separator();
                     ui.strong("Libration through this lunation (geocentric)");
+                    if !st.lunation_covered {
+                        ui.weak(
+                            "Not shown: the lunation around this date extends beyond the                              ephemeris coverage.",
+                        );
+                    }
                     if let Some(curve) = &self.curve {
                         let now = libration_graph::lb_deg(eph.as_ref(), tc.settings.instant());
                         let w = ui.available_width().clamp(240.0, 420.0);
@@ -343,10 +369,21 @@ fn data_grid(ui: &mut egui::Ui, st: &MoonState, p: &MoonPhysical, topocentric: b
     let rows: Vec<(&str, String)> = vec![
         ("Phase", phase_name(st.elong_lon).to_string()),
         ("Illuminated", format!("{:.1} %", illum.fraction * 100.0)),
-        ("Age", format!("{:.2} days", r.moon_age_days)),
+        (
+            "Age",
+            if r.moon_age_days.is_finite() {
+                format!("{:.2} days", r.moon_age_days)
+            } else {
+                "— (before the ephemeris coverage)".into()
+            },
+        ),
         (
             "Last new Moon",
-            format::date_time(Instant::from_jd_tt(r.conjunction_jd_tt), tz),
+            if r.conjunction_jd_tt.is_finite() {
+                format::date_time(Instant::from_jd_tt(r.conjunction_jd_tt), tz)
+            } else {
+                "—".into()
+            },
         ),
         ("Elongation", format!("{:.2}°", illum.elongation / DEG)),
         ("Phase angle", format!("{:.2}°", illum.phase_angle / DEG)),
@@ -428,7 +465,11 @@ fn crater_ui(ui: &mut egui::Ui, st: &MoonState, tc: &mut TabContext<'_>) -> Opti
             });
     });
     let Some(c) = &st.crater else {
-        ui.weak("Unknown crater.");
+        ui.weak(if st.lunation_covered {
+            "Unknown crater."
+        } else {
+            "Sunrise and sunset not computed: the month ahead extends beyond the ephemeris              coverage."
+        });
         return None;
     };
     egui::Grid::new("crater_events")
