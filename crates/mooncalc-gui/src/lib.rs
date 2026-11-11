@@ -30,6 +30,7 @@ pub mod location;
 pub mod panels;
 pub mod placeholder_map;
 pub mod settings;
+pub mod sky;
 pub mod status;
 pub mod tabs;
 pub mod widgets;
