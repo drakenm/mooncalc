@@ -7,13 +7,24 @@ import { invoke } from '@tauri-apps/api/core';
 import { BackendError, type Backend } from './backend';
 import type {
   AppInfo,
+  Basemap,
+  BasemapParams,
   City,
   CitySearchParams,
   CriterionInfo,
+  EarliestParams,
+  EarliestResult,
+  EphemerisBackendInfo,
+  ExportPngParams,
+  LoadDe440Params,
   LocationReport,
   LocationReportParams,
   MapParams,
   MapResult,
+  NearestCity,
+  NearestCityParams,
+  PngImage,
+  SavedFile,
 } from './types';
 
 async function call<T>(command: string, args?: Record<string, unknown>): Promise<T> {
@@ -39,11 +50,35 @@ export class TauriBackend implements Backend {
     return call('compute_visibility_map', { params });
   }
 
+  exportMapPng(params: ExportPngParams): Promise<PngImage> {
+    return call('export_map_png', { params });
+  }
+
+  saveMapPng(params: ExportPngParams): Promise<SavedFile> {
+    return call('save_map_png', { params });
+  }
+
   locationReport(params: LocationReportParams): Promise<LocationReport> {
     return call('location_report', { params });
   }
 
   searchCities(params: CitySearchParams): Promise<City[]> {
     return call('search_cities', { params });
+  }
+
+  nearestCity(params: NearestCityParams): Promise<NearestCity | null> {
+    return call('nearest_city', { params });
+  }
+
+  earliestSighting(params: EarliestParams): Promise<EarliestResult> {
+    return call('earliest_sighting', { params });
+  }
+
+  basemap(params: BasemapParams): Promise<Basemap> {
+    return call('basemap', { params });
+  }
+
+  loadDe440(params: LoadDe440Params): Promise<EphemerisBackendInfo> {
+    return call('load_de440', { params });
   }
 }

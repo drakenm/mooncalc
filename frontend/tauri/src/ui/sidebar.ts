@@ -1,7 +1,7 @@
 // Sidebar: date/time, location (with city search), criterion, crescent and
 // ephemeris. Writes to the store; re-renders its inputs when the store changes.
 
-import type { AppInfo, Backend, City, CriterionInfo } from '../backend';
+import { BackendError, type AppInfo, type Backend, type City, type CriterionInfo } from '../backend';
 import type { AppState, Store } from '../state';
 import { debounce, h, replaceChildren } from './dom';
 import { formatDate, formatOffset, formatTime, shiftHours, utToDate, zoneOffsetHours } from './format';
@@ -102,11 +102,13 @@ export function createSidebar({ backend, store, info, criteria }: SidebarContext
   let searchSeq = 0;
 
   const chooseCity = (c: City) => {
-    const offset = c.timeZone ? zoneOffsetHours(c.timeZone, utToDate(store.get().instant)) : null;
+    // The browser's tz rules know DST for the selected date; the atlas offset
+    // is the fallback.
+    const offset = (c.timeZone ? zoneOffsetHours(c.timeZone, utToDate(store.get().instant)) : null) ?? c.stdOffsetHours;
     store.update({
       location: { ...c.location },
       locationName: `${c.name}, ${c.country}`,
-      ...(offset !== null ? { tzOffsetHours: offset } : {}),
+      tzOffsetHours: offset,
     });
     searchInput.value = '';
     results.hidden = true;
@@ -132,7 +134,12 @@ export function createSidebar({ backend, store, info, criteria }: SidebarContext
                   'button',
                   { type: 'button', role: 'option', onclick: () => chooseCity(c) },
                   h('span', { class: 'city-name' }, c.name),
-                  h('span', { class: 'city-meta' }, [c.admin1, c.country].filter(Boolean).join(', ')),
+                  h(
+                    'span',
+                    { class: 'city-meta' },
+                    [c.admin1, c.country].filter(Boolean).join(', ') +
+                      (c.population ? ` · ${(c.population / 1e6 >= 1 ? `${(c.population / 1e6).toFixed(1)} M` : `${Math.round(c.population / 1e3)} k`)}` : ''),
+                  ),
                 ),
               ),
             )
@@ -172,13 +179,44 @@ export function createSidebar({ backend, store, info, criteria }: SidebarContext
     ),
   );
 
+  let backends = info.ephemerisBackends;
   const ephemerisSelect = h(
     'select',
     { onchange: () => store.update({ ephemerisId: ephemerisSelect.value }) },
-    ...info.ephemerisBackends.map((b) =>
-      h('option', { value: b.id, disabled: !b.available, title: b.description }, b.available ? b.name : `${b.name} (unavailable)`),
+    ...backends.map((b) =>
+      h('option', { value: b.id, disabled: !b.available, title: b.description }, b.available ? b.name : `${b.name} (not in this build)`),
     ),
   );
+  const ephemerisHint = h('p', { class: 'hint' });
+  const de440Input = h('input', { type: 'text', placeholder: 'C:\path\to\de440s.bsp', spellcheck: 'false', 'aria-label': 'DE440 file path' });
+  const de440Status = h('p', { class: 'hint', 'aria-live': 'polite' });
+  const de440Load = h(
+    'button',
+    {
+      type: 'button',
+      class: 'button small',
+      onclick: async () => {
+        const path = de440Input.value.trim();
+        if (!path) return;
+        de440Load.disabled = true;
+        de440Status.textContent = 'Loading…';
+        try {
+          const b = await backend.loadDe440({ path });
+          backends = backends.map((x) => (x.id === b.id ? b : x));
+          store.update({ de440Path: path, ephemerisId: 'de440' });
+          de440Status.textContent = b.detail ?? 'Loaded';
+        } catch (err) {
+          de440Status.textContent = `Could not load: ${BackendError.from(err).message}`;
+        } finally {
+          de440Load.disabled = false;
+        }
+      },
+    },
+    'Load',
+  );
+  const de440Row = h('div', { class: 'de440' }, h('div', { class: 'inline-row' }, de440Input, de440Load), de440Status);
+  const de440Available = info.ephemerisBackends.some((b) => b.id === 'de440' && b.available);
+  de440Row.hidden = !de440Available;
 
   // --- Sync inputs from state ---------------------------------------------
   const render = (s: AppState) => {
@@ -200,6 +238,9 @@ export function createSidebar({ backend, store, info, criteria }: SidebarContext
     criterionRef.textContent = criteria.find((c) => c.id === s.criterionId)?.reference ?? '';
     for (const b of crescentButtons) b.setAttribute('aria-pressed', String(b.dataset['value'] === s.crescent));
     ephemerisSelect.value = s.ephemerisId;
+    const eb = backends.find((b) => b.id === s.ephemerisId);
+    ephemerisHint.textContent = eb ? (eb.ready ? eb.description : `${eb.description} Not loaded yet.`) : '';
+    if (active !== de440Input && !de440Input.value) de440Input.value = s.de440Path;
   };
   store.subscribe(render);
   render(store.get());
@@ -237,7 +278,7 @@ export function createSidebar({ backend, store, info, criteria }: SidebarContext
       criterionRef,
       h('div', { class: 'segmented', role: 'group', 'aria-label': 'Crescent' }, ...crescentButtons),
     ),
-    h('section', { class: 'panel' }, h('h2', {}, 'Ephemeris'), ephemerisSelect),
+    h('section', { class: 'panel' }, h('h2', {}, 'Ephemeris'), ephemerisSelect, ephemerisHint, de440Row),
     h(
       'footer',
       { class: 'sidebar-footer' },

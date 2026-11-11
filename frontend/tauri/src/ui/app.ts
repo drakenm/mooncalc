@@ -3,13 +3,14 @@
 import type { AppInfo, Backend, CriterionInfo } from '../backend';
 import type { Store } from '../state';
 import { createAbout } from './about';
+import { createEarliestView } from './earliest-view';
 import { h } from './dom';
 import { MapView } from './map-view';
 import { createPlaceholder, PLACEHOLDERS } from './placeholders';
 import { ReportView } from './report-view';
 import { createSidebar } from './sidebar';
 
-type TabId = 'map' | 'report' | 'ephemeris' | 'calendar' | 'sky' | 'moon' | 'trajectory' | 'about';
+type TabId = 'map' | 'report' | 'earliest' | 'ephemeris' | 'calendar' | 'sky' | 'moon' | 'trajectory' | 'about';
 
 interface Tab {
   id: TabId;
@@ -34,6 +35,36 @@ export function createApp(ctx: AppContext): HTMLElement {
   const tabs: Tab[] = [
     { id: 'map', label: 'Map', panel: map.el, setActive: (a) => map.setActive(a) },
     { id: 'report', label: 'Report', panel: report.el, setActive: (a) => report.setActive(a) },
+    {
+      id: 'earliest',
+      label: 'Earliest sighting',
+      panel: createEarliestView({
+        backend: ctx.backend,
+        store: ctx.store,
+        criteria: ctx.criteria,
+        showMap: (date, latDeg, lonDeg) => {
+          // Noon local time on that date, so the map shows its evening.
+          const utMinutes = Math.round((12 - ctx.store.get().tzOffsetHours) * 60);
+          const dayShift = Math.floor(utMinutes / 1440);
+          const minuteOfDay = utMinutes - dayShift * 1440;
+          const base = new Date(0);
+          base.setUTCFullYear(date.year, date.month - 1, date.day + dayShift);
+          ctx.store.update({
+            crescent: 'evening',
+            instant: {
+              year: base.getUTCFullYear(),
+              month: base.getUTCMonth() + 1,
+              day: base.getUTCDate(),
+              hour: Math.floor(minuteOfDay / 60),
+              minute: minuteOfDay % 60,
+              second: 0,
+            },
+          });
+          select('map');
+          map.centreOn(latDeg, lonDeg);
+        },
+      }),
+    },
     { id: 'ephemeris', label: 'Ephemeris', panel: createPlaceholder(PLACEHOLDERS.ephemeris) },
     { id: 'calendar', label: 'Calendar', panel: createPlaceholder(PLACEHOLDERS.calendar) },
     { id: 'sky', label: 'Sky', panel: createPlaceholder(PLACEHOLDERS.sky) },

@@ -3,19 +3,31 @@
 // UI code talks to MoonCalc's Rust core only through this interface. Each
 // transport implements it: TauriBackend (desktop, `invoke`), MockBackend
 // (plain browser, synthetic data) and, later, WasmBackend (browser, the same
-// Rust services compiled to wasm32). UI modules must never import a transport
-// or `@tauri-apps/*` directly; they receive a Backend from `createBackend()`.
+// mooncalc-app services compiled to wasm32). UI modules must never import a
+// transport or `@tauri-apps/*` directly; they receive a Backend from
+// `createBackend()`.
 
 import type {
   ApiError,
   AppInfo,
+  Basemap,
+  BasemapParams,
   City,
   CitySearchParams,
   CriterionInfo,
+  EarliestParams,
+  EarliestResult,
+  EphemerisBackendInfo,
+  ExportPngParams,
+  LoadDe440Params,
   LocationReport,
   LocationReportParams,
   MapParams,
   MapResult,
+  NearestCity,
+  NearestCityParams,
+  PngImage,
+  SavedFile,
 } from './types';
 
 export type BackendKind = 'tauri' | 'wasm' | 'mock';
@@ -25,8 +37,15 @@ export interface Backend {
   appInfo(): Promise<AppInfo>;
   criteriaList(): Promise<CriterionInfo[]>;
   computeVisibilityMap(params: MapParams): Promise<MapResult>;
+  exportMapPng(params: ExportPngParams): Promise<PngImage>;
+  /** Desktop transports only: render and save to the Downloads folder. */
+  saveMapPng?(params: ExportPngParams): Promise<SavedFile>;
   locationReport(params: LocationReportParams): Promise<LocationReport>;
   searchCities(params: CitySearchParams): Promise<City[]>;
+  nearestCity(params: NearestCityParams): Promise<NearestCity | null>;
+  earliestSighting(params: EarliestParams): Promise<EarliestResult>;
+  basemap(params: BasemapParams): Promise<Basemap>;
+  loadDe440(params: LoadDe440Params): Promise<EphemerisBackendInfo>;
 }
 
 /** Every backend method rejects with a BackendError. */
