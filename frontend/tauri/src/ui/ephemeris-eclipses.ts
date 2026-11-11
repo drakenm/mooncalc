@@ -7,6 +7,7 @@ import { localDateTime, localDayTime, timeLink, utLabel, zoneLabel } from './app
 import { debounce, h, replaceChildren } from './dom';
 import { runner, type EphemerisContext, type SubView } from './ephemeris-view';
 import { formatLat, formatLon } from './format';
+import { type Tz, tzOf } from '../zone';
 
 type Row = [string, string | Node];
 
@@ -91,12 +92,12 @@ export function createEclipsesView({ backend, store }: EphemerisContext): SubVie
   store.subscribe((s, prev) => {
     if (changed(s, prev, ['ephemerisId']) || (local.checked && changed(s, prev, ['location']))) invalidate();
     else if (pinnedFrom === null && localDate(s).year !== localDate(prev).year) invalidate();
-    else if (changed(s, prev, ['tzOffsetHours', 'locationName']) && last) render();
+    else if (changed(s, prev, ['tzOffsetHours', 'timeZone', 'locationName']) && last) render();
   });
 
   const render = () => {
     if (!last) return;
-    const tz = store.get().tzOffsetHours;
+    const tz = tzOf(store.get());
     const hasLoc = last.location !== null;
     replaceChildren(
       list,
@@ -133,7 +134,7 @@ export function createEclipsesView({ backend, store }: EphemerisContext): SubVie
     replaceChildren(details, e ? renderDetails(e, last, tz) : '');
   };
 
-  const contact = (label: string, c: SolarContact | null, tz: number) =>
+  const contact = (label: string, c: SolarContact | null, tz: Tz) =>
     c
       ? h(
           'tr',
@@ -145,7 +146,7 @@ export function createEclipsesView({ backend, store }: EphemerisContext): SubVie
         )
       : null;
 
-  const renderDetails = (e: EclipseInfo, l: EclipseList, tz: number): HTMLElement => {
+  const renderDetails = (e: EclipseInfo, l: EclipseList, tz: Tz): HTMLElement => {
     const s = store.get();
     const place = l.location ? `${s.locationName ?? 'Custom location'} (${formatLat(l.location.latDeg, 2)} ${formatLon(l.location.lonDeg, 2)})` : null;
     const head = h('h3', {}, h('span', { class: `eclipse-icon ${e.body}` }, e.body === 'solar' ? '☉' : '☾'), ` ${e.label} eclipse of ${localDayTime(e.greatest, tz).replace(/ \d\d:\d\d$/, '')} ${e.greatest.year}`);

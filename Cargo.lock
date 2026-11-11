@@ -2730,6 +2730,7 @@ dependencies = [
  "defmt",
  "jiff-core",
  "jiff-static",
+ "jiff-tzdb",
  "jiff-tzdb-platform",
  "log",
  "portable-atomic",
@@ -3143,6 +3144,8 @@ dependencies = [
 name = "mooncalc-atlas"
 version = "0.1.0"
 dependencies = [
+ "jiff",
+ "jiff-tzdb",
  "mooncalc-core",
  "serde",
  "serde_json",

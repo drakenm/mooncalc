@@ -6,6 +6,7 @@
 
 use mooncalc_app::dto::ApiError;
 use mooncalc_app::tables::{YEAR_COVERAGE_MARGIN_DAYS, YearParams};
+use mooncalc_atlas::Zone;
 #[cfg(test)]
 use mooncalc_core::events::phases::SYNODIC_MONTH_DAYS;
 use mooncalc_core::events::phases::moon_age_days;
@@ -41,12 +42,13 @@ impl Lunation {
 
 /// The lunations with at least one phase in local `year`
 /// (`mooncalc_app::tables::lunar_phases`).
-pub fn lunations(eph: &dyn Ephemeris, year: i32, tz: f64) -> Result<Vec<Lunation>, ApiError> {
+pub fn lunations(eph: &dyn Ephemeris, year: i32, tz: Zone) -> Result<Vec<Lunation>, ApiError> {
     let y = mooncalc_app::tables::lunar_phases(
         eph,
         &YearParams {
             year,
-            tz_offset_hours: tz,
+            tz_offset_hours: tz.fixed_offset_hours().unwrap_or_default(),
+            time_zone: tz.iana_name().map(str::to_owned),
             ephemeris_id: None,
         },
     )?;
@@ -64,7 +66,7 @@ pub fn lunations(eph: &dyn Ephemeris, year: i32, tz: f64) -> Result<Vec<Lunation
 #[derive(Clone, Debug, PartialEq)]
 struct Request {
     year: i32,
-    tz: f64,
+    tz: Zone,
     eph: EphKey,
 }
 
@@ -86,7 +88,7 @@ impl PhasesView {
         if visible && self.coverage(tc).is_none() {
             let req = Request {
                 year: self.year.unwrap_or(app_year(tc.settings)),
-                tz: tc.settings.time.tz_offset_hours,
+                tz: tc.settings.time.zone(),
                 eph: EphKey::of(tc.settings),
             };
             let eph = ephemeris(tc.settings);
@@ -100,7 +102,7 @@ impl PhasesView {
     }
 
     pub fn ui(&mut self, ui: &mut egui::Ui, tc: &mut TabContext<'_>) {
-        let tz = tc.settings.time.tz_offset_hours;
+        let tz = tc.settings.time.zone();
         let eph = ephemeris(tc.settings);
         ui.horizontal_wrapped(|ui| {
             year_picker(ui, &mut self.year, app_year(tc.settings));
@@ -191,7 +193,7 @@ mod tests {
     #[test]
     fn phases_of_2024() {
         let eph = MeeusEphemeris::new();
-        let ls = lunations(&eph, 2024, 0.0).unwrap();
+        let ls = lunations(&eph, 2024, Zone::UTC).unwrap();
         let count: usize = ls.iter().map(|l| l.phases.iter().flatten().count()).sum();
         // 2024 has 13 new Moons (the last on 30 December), 12 first
         // quarters, 12 full Moons and 13 last quarters (USNO).

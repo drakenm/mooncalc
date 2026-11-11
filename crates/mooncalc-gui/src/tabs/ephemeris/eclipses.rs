@@ -13,6 +13,7 @@ use mooncalc_app::tables::{
     ECLIPSE_COVERAGE_MARGIN_DAYS, EclipseDto, EclipseKindFilter, EclipsesParams, LunarContactDto,
     SolarContactDto, eclipse_candidates, eclipse_details,
 };
+use mooncalc_atlas::Zone;
 use mooncalc_core::{Ephemeris, Instant};
 use serde::{Deserialize, Serialize};
 
@@ -61,6 +62,9 @@ pub fn eclipse_items(
         filter,
         location: Some(location),
         ephemeris_id: None,
+        // Times are formatted here, in the app zone.
+        tz_offset_hours: 0.0,
+        time_zone: None,
     };
     let list = eclipse_candidates(eph, &params).map_err(|e| JobError::Failed(e.message))?;
     let n = list.len().max(1) as f32;
@@ -148,7 +152,7 @@ impl EclipsesView {
     /// The searched years, plus the service's margin.
     fn coverage(&self, tc: &TabContext<'_>) -> Option<String> {
         let (first, last) = self.range(tc);
-        let tz = tc.settings.time.tz_offset_hours;
+        let tz = tc.settings.time.zone();
         let (start, _) = year_bounds(first, tz);
         let (_, end) = year_bounds(last, tz);
         coverage(
@@ -187,7 +191,7 @@ impl EclipsesView {
     }
 
     pub fn ui(&mut self, ui: &mut egui::Ui, tc: &mut TabContext<'_>) {
-        let tz = tc.settings.time.tz_offset_hours;
+        let tz = tc.settings.time.zone();
         ui.horizontal_wrapped(|ui| {
             let app = app_year(tc.settings);
             let mut first = self.first.unwrap_or(app);
@@ -349,7 +353,7 @@ fn summary(item: &EclipseItem) -> (String, String, String) {
 fn details_ui(
     ui: &mut egui::Ui,
     item: &EclipseItem,
-    tz: f64,
+    tz: Zone,
     location: &str,
     clicked: &mut Option<Instant>,
 ) {

@@ -26,15 +26,21 @@ use crate::dto::{ApiError, CivilDate, Location, UtDateTime};
 use crate::ephemeris::check_covers;
 use crate::sky::scene::{DAY_SAMPLE_STEP, DayScene};
 use crate::validate;
+use crate::zone::Localize;
 
 /// Input of `trajectory_day`.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TrajectoryParams {
-    /// The local calendar date, midnight to midnight in the
-    /// `tz_offset_hours` zone.
+    /// The local calendar date, midnight to midnight in the request's zone
+    /// (23 or 25 hours when clocks change).
     pub date: CivilDate,
+    /// Fixed offset from UT, hours, used when `time_zone` is absent.
+    #[serde(default)]
     pub tz_offset_hours: f64,
+    /// IANA time zone; takes precedence over `tz_offset_hours`.
+    #[serde(default)]
+    pub time_zone: Option<String>,
     pub location: Location,
     #[serde(default)]
     pub ephemeris_id: Option<String>,
@@ -103,11 +109,17 @@ pub struct PhaseEvent {
 pub struct TrajectoryDay {
     pub location: Location,
     pub date: CivilDate,
+    /// The offset at local midnight starting the day, hours (times carry
+    /// their own).
     pub tz_offset_hours: f64,
+    /// The IANA zone used, if any.
+    pub time_zone: Option<String>,
     pub ephemeris: String,
     /// Local midnight starting the day; sample `i` is at
-    /// `day_start + i × step_minutes`, the last at the next midnight.
+    /// `day_start + i × step_minutes`, the last at the next midnight
+    /// (`day_end`; 23 or 25 hours later when clocks change).
     pub day_start: UtDateTime,
+    pub day_end: UtDateTime,
     pub step_minutes: f64,
     pub samples: Vec<TrackSample>,
     pub sun: BodyDayEvents,
@@ -167,11 +179,11 @@ pub fn trajectory_day(
 ) -> Result<TrajectoryDay, ApiError> {
     validate::date(p.date)?;
     validate::location(p.location)?;
-    validate::tz_offset(p.tz_offset_hours)?;
+    let zone = crate::zone::resolve(p.tz_offset_hours, p.time_zone.as_deref())?;
     let date = CalendarDate::from(p.date);
     let start_tt = Instant::from_jd_ut(date.jd0()).jd_tt();
     check_covers(eph, start_tt - 33.0, start_tt + 63.0)?;
-    let day = DayScene::compute(eph, date, p.tz_offset_hours, GeoLocation::from(p.location));
+    let day = DayScene::compute(eph, date, zone, GeoLocation::from(p.location));
     let samples = day
         .samples
         .iter()
@@ -192,12 +204,14 @@ pub fn trajectory_day(
         dawn: day.twilights[i].0.map(ut),
         dusk: day.twilights[i].1.map(ut),
     };
-    Ok(TrajectoryDay {
+    let mut result = TrajectoryDay {
         location: p.location,
         date: p.date,
-        tz_offset_hours: p.tz_offset_hours,
+        tz_offset_hours: zone.offset_hours(day.start),
+        time_zone: zone.iana_name().map(str::to_owned),
         ephemeris: day.ephemeris_name.clone(),
         day_start: ut(Instant::from_jd_ut(day.start)),
+        day_end: ut(Instant::from_jd_ut(day.end)),
         step_minutes: DAY_SAMPLE_STEP * 1440.0,
         samples,
         sun: body_events(&day, &day.sun, false),
@@ -213,7 +227,16 @@ pub fn trajectory_day(
                 time: ut(*t),
             })
             .collect(),
-    })
+    };
+    result.localize(zone);
+    Ok(result)
+}
+
+crate::zone::localize_fields! {
+    BodyDayEvents: rise, set, transit;
+    TrajectoryTwilight: dawn, dusk;
+    PhaseEvent: time;
+    TrajectoryDay: day_start, day_end, sun, moon, civil, nautical, astronomical, phases;
 }
 
 #[cfg(test)]
@@ -237,6 +260,7 @@ mod tests {
                     day: 11,
                 },
                 tz_offset_hours: 0.0,
+                time_zone: None,
                 location: Location {
                     lat_deg: 51.5074,
                     lon_deg: -0.1278,
@@ -304,6 +328,7 @@ mod tests {
                 day: 21,
             },
             tz_offset_hours: 1.0,
+            time_zone: None,
             location: Location {
                 lat_deg: 78.2,
                 lon_deg: 15.6,

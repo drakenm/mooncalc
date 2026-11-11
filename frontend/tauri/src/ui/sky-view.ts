@@ -17,7 +17,8 @@
 import './sky.css';
 
 import { BackendError, type Backend, type SkySample, type SkyScene, type SkySceneParams } from '../backend';
-import { changed, localDate, type Store } from '../state';
+import { changed, localDate, type Store, zoneParams } from '../state';
+import { tzOf } from '../zone';
 import { debounce, h, replaceChildren } from './dom';
 import { formatDate, formatValue, valueSymbol } from './format';
 import { ViewPrefs } from './view-prefs';
@@ -33,6 +34,7 @@ import {
   drawSun,
   hm,
   label,
+  localHm,
   norm180,
   norm360,
   polyline,
@@ -176,7 +178,7 @@ export class SkyView {
 
     const refresh = debounce(() => void this.refresh(), 150);
     this.store.subscribe((s, prev) => {
-      if (changed(s, prev, ['instant', 'tzOffsetHours', 'location', 'crescent', 'criterionId', 'ephemerisId'])) {
+      if (changed(s, prev, ['instant', 'tzOffsetHours', 'timeZone', 'location', 'crescent', 'criterionId', 'ephemerisId'])) {
         this.stale = true;
         if (this.active) refresh();
       }
@@ -194,7 +196,7 @@ export class SkyView {
     const s = this.store.get();
     return {
       date: localDate(s),
-      tzOffsetHours: s.tzOffsetHours,
+      ...zoneParams(s, localDate(s)),
       location: s.location,
       crescent: s.crescent,
       criterionId: s.criterionId,
@@ -253,21 +255,22 @@ export class SkyView {
 
   private formatSliderTime(minute: number): string {
     if (!this.scene) return '';
-    const tz = this.scene.tzOffsetHours;
-    return `${hm(utMs(this.scene.start) + minute * 60_000, tz)} ${zoneLabel(tz)}`;
+    const tz = tzOf(this.store.get());
+    const ms = utMs(this.scene.start) + minute * 60_000;
+    return `${hm(ms, tz)} ${zoneLabel(tz, ms)}`;
   }
 
   // --- Text ---------------------------------------------------------------------
 
   private renderSummary(): void {
     const sc = this.scene!;
-    const tz = sc.tzOffsetHours;
+    const tz = tzOf(this.store.get());
     const evening = sc.crescent === 'evening';
-    const t = (x: typeof sc.sunEvent) => (x ? hm(utMs(x), tz) : '—');
+    const t = (x: typeof sc.sunEvent) => localHm(x, tz);
     const g = sc.geometry;
     const parts: (string | Node)[] = [
       h('strong', {}, `${formatDate(sc.date)} ${evening ? 'evening' : 'morning'}`),
-      ` · ${evening ? 'Sunset' : 'Sunrise'} ${t(sc.sunEvent)} · ${evening ? 'Moonset' : 'Moonrise'} ${t(sc.moonEvent)} · Best ${t(sc.bestTime)} ${zoneLabel(tz)}`,
+      ` · ${evening ? 'Sunset' : 'Sunrise'} ${t(sc.sunEvent)} · ${evening ? 'Moonset' : 'Moonrise'} ${t(sc.moonEvent)} · Best ${t(sc.bestTime)} ${zoneLabel(tz, utMs(sc.bestTime ?? sc.defaultTime))}`,
     ];
     if (g) {
       parts.push(` · Lag ${g.lagMinutes === null ? '—' : `${g.lagMinutes.toFixed(0)} min`} · Age ${g.ageHours.toFixed(1)} h`);
@@ -284,11 +287,11 @@ export class SkyView {
     const sc = this.scene;
     if (!sc || !this.series) return;
     const s = this.series.at(this.timeMs);
-    const tz = sc.tzOffsetHours;
+    const tz = tzOf(this.store.get());
     const f = (v: number, d = 1) => v.toFixed(d);
     replaceChildren(
       this.readout,
-      h('span', {}, h('strong', {}, `${hm(this.timeMs, tz)} ${zoneLabel(tz)}`)),
+      h('span', {}, h('strong', {}, `${hm(this.timeMs, tz)} ${zoneLabel(tz, this.timeMs)}`)),
       h('span', {}, `Sun alt ${f(s.sunAltDeg)}° az ${f(s.sunAzDeg)}°`),
       h('span', {}, `Moon alt ${f(s.moonAltDeg)}° az ${f(s.moonAzDeg)}° ${compassPoint(s.moonAzDeg)}`),
       h('span', {}, `ARCL ${f(s.arclDeg)}° · ARCV ${f(s.arcvDeg)}° · DAZ ${s.dazDeg >= 0 ? '+' : ''}${f(s.dazDeg)}°`),
@@ -439,6 +442,7 @@ export class SkyView {
         ctx.lineWidth = 1.3;
         polyline(ctx, series.samples.map((x) => project(x[alt], x[az])), w / 2);
         ctx.globalAlpha = 1;
+        const tz = tzOf(this.store.get());
         for (const [t, x] of this.marks()) {
           const [px, py] = project(x[alt], x[az]);
           if (px < -10 || px > w + 10 || py < -10 || py > hh + 10) continue;
@@ -446,8 +450,8 @@ export class SkyView {
           ctx.arc(px, py, 2.2, 0, 2 * Math.PI);
           ctx.fillStyle = color;
           ctx.fill();
-          const minute = new Date(t + sc.tzOffsetHours * 3_600_000).getUTCMinutes();
-          if (this.showLabels && minute % 30 === 0) label(ctx, hm(t, sc.tzOffsetHours), px + 5, py - 7, color, 'left', 'middle', 10);
+          const minute = new Date(t + tz.offsetAtMs(t) * 3_600_000).getUTCMinutes();
+          if (this.showLabels && minute % 30 === 0) label(ctx, hm(t, tz), px + 5, py - 7, color, 'left', 'middle', 10);
         }
       }
     }

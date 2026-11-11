@@ -45,6 +45,7 @@ use crate::dto::{
 use crate::ephemeris::check_covers;
 use crate::report::{status_code, status_text};
 use crate::validate;
+use crate::zone::Localize;
 use scene::{ATMOSPHERE, NIGHT_SAMPLE_STEP, NightScene, Snapshot};
 use stars::{BRIGHT_STARS, StarOfDate, stars_of_date};
 
@@ -59,10 +60,15 @@ pub const DEFAULT_CRITERION: &str = "yallop";
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SkySceneParams {
-    /// The local calendar date (in the `tz_offset_hours` zone) whose evening
-    /// (or morning) is shown; civil noon anchors it, as in the report.
+    /// The local calendar date (in the request's zone) whose evening (or
+    /// morning) is shown; civil noon anchors it, as in the report.
     pub date: CivilDate,
+    /// Fixed offset from UT, hours, used when `time_zone` is absent.
+    #[serde(default)]
     pub tz_offset_hours: f64,
+    /// IANA time zone; takes precedence over `tz_offset_hours`.
+    #[serde(default)]
+    pub time_zone: Option<String>,
     pub location: Location,
     pub crescent: Crescent,
     /// Criterion whose evaluation time is the "best time" and whose verdict
@@ -146,7 +152,10 @@ pub struct StarDto {
 pub struct SkyScene {
     pub location: Location,
     pub date: CivilDate,
+    /// The offset at local civil noon, hours (times carry their own).
     pub tz_offset_hours: f64,
+    /// The IANA zone used, if any.
+    pub time_zone: Option<String>,
     pub crescent: Crescent,
     pub ephemeris: String,
     pub criterion_id: String,
@@ -283,20 +292,20 @@ fn sample(night: &NightScene, s: &Snapshot) -> SkySample {
 pub fn sky_scene(eph: &dyn Ephemeris, p: &SkySceneParams) -> Result<SkyScene, ApiError> {
     validate::date(p.date)?;
     validate::location(p.location)?;
-    validate::tz_offset(p.tz_offset_hours)?;
+    let zone = crate::zone::resolve(p.tz_offset_hours, p.time_zone.as_deref())?;
     let mag = magnitude_limit(p.magnitude_limit)?;
     let criterion_id = p.criterion_id.as_deref().unwrap_or(DEFAULT_CRITERION);
     let criterion = mooncalc_visibility::criteria::by_id(criterion_id)
         .ok_or_else(|| ApiError::unknown_criterion(criterion_id))?;
     let date = CalendarDate::from(p.date);
-    let noon = scene::civil_noon(date, p.tz_offset_hours);
+    let noon = scene::civil_noon(date, zone);
     let noon_tt = Instant::from_jd_ut(noon).jd_tt();
     check_covers(eph, noon_tt - 32.0, noon_tt + 32.0)?;
 
     let night = NightScene::compute(
         eph,
         date,
-        p.tz_offset_hours,
+        zone,
         GeoLocation::from(p.location),
         p.crescent.into(),
         criterion_id,
@@ -309,10 +318,11 @@ pub fn sky_scene(eph: &dyn Ephemeris, p: &SkySceneParams) -> Result<SkyScene, Ap
         .filter(|s| s.star.vmag <= mag)
         .map(star_dto)
         .collect();
-    Ok(SkyScene {
+    let mut result = SkyScene {
         location: p.location,
         date: p.date,
-        tz_offset_hours: p.tz_offset_hours,
+        tz_offset_hours: zone.offset_hours(noon),
+        time_zone: zone.iana_name().map(str::to_owned),
         crescent: p.crescent,
         ephemeris: night.ephemeris_name.clone(),
         criterion_id: criterion.id().into(),
@@ -337,7 +347,14 @@ pub fn sky_scene(eph: &dyn Ephemeris, p: &SkySceneParams) -> Result<SkyScene, Ap
         samples,
         stars,
         obliquity_deg: deg(NutationObliquity::at(noon_tt).eps),
-    })
+    };
+    result.localize(zone);
+    Ok(result)
+}
+
+crate::zone::localize_fields! {
+    SkyScene: sun_event, moon_event, best_time, conjunction, start, end, default_time,
+        samples_start;
 }
 
 /// The bright stars reduced to the true equator and equinox of an instant,
@@ -393,6 +410,7 @@ mod tests {
                 day: 11,
             },
             tz_offset_hours: 3.0,
+            time_zone: None,
             location: Location {
                 lat_deg: 21.4225,
                 lon_deg: 39.8262,
@@ -498,6 +516,7 @@ mod tests {
                 hour: 21,
                 minute: 0,
                 second: 0.0,
+                offset_hours: None,
             },
             location: Some(Location {
                 lat_deg: 51.5074,

@@ -21,6 +21,7 @@
 //! outside the ephemeris coverage shows a notice instead. The view options
 //! persist in [`SkySettings`].
 
+use mooncalc_atlas::Zone;
 use std::sync::Arc;
 
 use egui::{Align2, Color32, Pos2, Rect, Sense, Stroke, pos2, vec2};
@@ -184,7 +185,7 @@ impl std::fmt::Debug for SkyTab {
 
 /// The coverage problem of the night for `key`, if any.
 fn coverage_problem(key: &NightKey, settings: &crate::settings::Settings) -> Option<String> {
-    let noon = civil_noon(key.date, key.tz_hours);
+    let noon = civil_noon(key.date, key.zone);
     crate::backend::resolve(settings.backend, &settings.de440_path).span_problem(
         noon,
         noon,
@@ -247,7 +248,7 @@ impl SkyTab {
     }
 
     fn ui_inner(&mut self, ui: &mut egui::Ui, tc: &mut TabContext<'_>) {
-        let tz = tc.settings.time.tz_offset_hours;
+        let tz = tc.settings.time.zone();
         let key = NightKey::from_settings(tc.settings);
         self.controls(ui);
         if let Some(problem) = coverage_problem(&key, tc.settings) {
@@ -346,7 +347,7 @@ impl SkyTab {
         self.opts.chart_px_per_deg = DEFAULT_CHART_PX_PER_DEG;
     }
 
-    fn time_controls(&mut self, ui: &mut egui::Ui, night: &Night, tz: f64) {
+    fn time_controls(&mut self, ui: &mut egui::Ui, night: &Night, tz: Zone) {
         ui.horizontal(|ui| {
             let icon = if self.playing { "⏸" } else { "▶" };
             if ui
@@ -420,7 +421,7 @@ impl SkyTab {
         response: &egui::Response,
         night: &Night,
         snap: &Snapshot,
-        tz: f64,
+        tz: Zone,
     ) {
         let rect = response.rect;
         // Interaction: wheel zooms the span, drag pans, double-click resets.
@@ -630,15 +631,16 @@ impl SkyTab {
         proj: &HorizonProjection,
         rect: Rect,
         night: &Night,
-        tz: f64,
+        tz: Zone,
     ) {
         const STEP: f64 = 10.0 / 1440.0;
-        let tz_days = tz / 24.0;
         let (p0, p1) = (
             night.samples.first().map_or(night.start, |s| s.jd_ut),
             night.samples.last().map_or(night.end, |s| s.jd_ut),
         );
-        // Dots at round local times.
+        // Dots at round local times (in the offset of the path's start; a
+        // DST change of whole hours keeps them round).
+        let tz_days = tz.offset_days(p0);
         let first = ((p0 + tz_days) / STEP).ceil() * STEP - tz_days;
         let px_per_10min = 10.0 * proj.px_per_rad * (0.25 * DEG) as f32;
         let label_every = if px_per_10min > 60.0 {
@@ -649,7 +651,7 @@ impl SkyTab {
             6
         };
         let mut t = first;
-        let mut k = (((first + tz_days) / STEP).round() as i64).rem_euclid(144);
+        let mut k = ((tz.to_local(first) / STEP).round() as i64).rem_euclid(144);
         while t <= p1 {
             let s = night.snapshot(t);
             let labelled = self.opts.show_labels && k % label_every == 0;
@@ -674,7 +676,7 @@ impl SkyTab {
                 }
             }
             t += STEP;
-            k = (k + 1).rem_euclid(144);
+            k = ((tz.to_local(t) / STEP).round() as i64).rem_euclid(144);
         }
     }
 
@@ -1066,10 +1068,14 @@ impl SkyTab {
         rect: Rect,
         night: &Night,
         snap: &Snapshot,
-        tz: f64,
+        tz: Zone,
     ) {
         let mut lines = vec![(
-            format!("{} (UTC{:+})", format_date_hm(self.time, tz), tz),
+            format!(
+                "{} ({})",
+                format_date_hm(self.time, tz),
+                crate::datetime::zone_abbrev(tz, self.time)
+            ),
             Color32::WHITE,
         )];
         lines.push((
@@ -1214,7 +1220,7 @@ fn age_text(age_hours: f64, crescent: Crescent) -> String {
 }
 
 /// One line describing the night and the criterion's verdict.
-fn summary_line(ui: &mut egui::Ui, night: &Night, tz: f64, crescent: Crescent) {
+fn summary_line(ui: &mut egui::Ui, night: &Night, tz: Zone, crescent: Crescent) {
     let hm = |t: Instant| format_hm(t.jd_ut, tz);
     let (sun_word, moon_word) = match crescent {
         Crescent::Evening => ("Sunset", "Moonset"),

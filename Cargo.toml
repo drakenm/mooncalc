@@ -31,6 +31,11 @@ mooncalc-app = { path = "crates/mooncalc-app" }
 
 # Third-party pins (released >= 14 days before adoption; see AGENTS.md).
 eframe = { version = "=0.37.0", features = ["persistence"] }
+# IANA time-zone rules (mooncalc-atlas::tz): jiff evaluates them, jiff-tzdb
+# embeds the database (bump jiff-tzdb for a new tzdata release). No `std`
+# features: nothing is read from the OS, so wasm32 gets the same data.
+jiff = { version = "=0.2.38", default-features = false, features = ["alloc", "tzdb-bundle-always"] }
+jiff-tzdb = "=0.1.9"
 egui = "=0.37.0"
 egui_extras = { version = "=0.37.0", default-features = false }
 png = "=0.18.1"

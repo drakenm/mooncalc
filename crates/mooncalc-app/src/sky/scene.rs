@@ -9,6 +9,7 @@
 //! interpolation at 30-minute nodes, far below 0.001″ of error) and then
 //! evaluate any instant cheaply, so a view can animate per frame.
 
+use mooncalc_atlas::Zone;
 use mooncalc_core::angle::norm_pi;
 use mooncalc_core::events::phases::{Phase, phases_between};
 use mooncalc_core::events::{
@@ -123,14 +124,14 @@ pub fn snapshot<S: PositionSource + ?Sized>(
     }
 }
 
-/// UT of civil noon on local date `date` in a zone `tz_hours` ahead of UT.
-pub fn civil_noon(date: CalendarDate, tz_hours: f64) -> f64 {
-    date.jd0() + 0.5 - tz_hours / 24.0
+/// UT Julian Day of civil noon on local date `date` in `zone`.
+pub fn civil_noon(date: CalendarDate, zone: Zone) -> f64 {
+    zone.civil_noon(date).jd_ut
 }
 
-/// The local calendar date of a UT Julian Day.
-pub fn local_date(jd_ut: f64, tz_hours: f64) -> CalendarDate {
-    CalendarDate::from_jd(jd_ut + tz_hours / 24.0)
+/// The local calendar date of a UT Julian Day in `zone`.
+pub fn local_date(jd_ut: f64, zone: Zone) -> CalendarDate {
+    zone.local_date(jd_ut)
 }
 
 /// Spacing of the precomputed path samples, days (2 minutes).
@@ -166,19 +167,19 @@ pub struct NightScene {
 }
 
 impl NightScene {
-    /// The evening or morning of local date `date` (zone `tz_hours` ahead
-    /// of UT, anchored at civil noon) at `location`, with the evaluation
+    /// The evening or morning of local date `date` (in `zone`, anchored at
+    /// civil noon) at `location`, with the evaluation
     /// time and verdict of criterion `criterion_id` (Yallop's best time when
     /// the id is unknown).
     pub fn compute(
         eph: &dyn Ephemeris,
         date: CalendarDate,
-        tz_hours: f64,
+        zone: Zone,
         location: GeoLocation,
         sighting: Sighting,
         criterion_id: &str,
     ) -> Self {
-        let noon = civil_noon(date, tz_hours);
+        let noon = civil_noon(date, zone);
         let evening = sighting == Sighting::Evening;
         let criterion = mooncalc_visibility::criteria::by_id(criterion_id);
         let evaluation_rule = criterion
@@ -314,8 +315,11 @@ pub const DAY_SAMPLE_STEP: f64 = 5.0 / 1440.0;
 pub struct DayScene {
     pub table: ApparentTable,
     pub observer: Observer,
-    /// Local midnight starting the day, UT JD; the day is `[start, start + 1)`.
+    /// Local midnight starting the day, UT JD; the day is `[start, end)`.
     pub start: f64,
+    /// The next local midnight, UT JD: `end − start` is 23 or 25 hours on a
+    /// day when clocks change.
+    pub end: f64,
     /// Samples every [`DAY_SAMPLE_STEP`] over the day, both ends included.
     pub samples: Vec<Snapshot>,
     pub sun: DayEvents,
@@ -329,21 +333,23 @@ pub struct DayScene {
 }
 
 impl DayScene {
-    /// Local date `date` in a zone `tz_hours` ahead of UT, at `location`.
+    /// Local date `date` in `zone`, from midnight to midnight, at
+    /// `location`.
     pub fn compute(
         eph: &dyn Ephemeris,
         date: CalendarDate,
-        tz_hours: f64,
+        zone: Zone,
         location: GeoLocation,
     ) -> Self {
-        let start = date.jd0() - tz_hours / 24.0;
+        let (t0, t1) = zone.day_bounds(date);
+        let (start, end) = (t0.jd_ut, t1.jd_ut);
         let table = ApparentTable::with_default_step(
             eph,
             Instant::from_jd_ut(start - 1.0),
             Instant::from_jd_ut(start + 2.0),
         );
         let observer = Observer::new(&location);
-        let n = (1.0 / DAY_SAMPLE_STEP).round() as usize;
+        let n = ((end - start) / DAY_SAMPLE_STEP).round() as usize;
         let samples = (0..=n)
             .map(|i| {
                 snapshot(
@@ -354,7 +360,6 @@ impl DayScene {
                 )
             })
             .collect();
-        let (t0, t1) = (Instant::from_jd_ut(start), Instant::from_jd_ut(start + 1.0));
         let loc = &location;
         let sun = day_events(&table, Body::Sun, loc, Horizon::STANDARD, t0, t1);
         let moon = day_events(&table, Body::Moon, loc, Horizon::STANDARD, t0, t1);
@@ -365,6 +370,7 @@ impl DayScene {
             table,
             observer,
             start,
+            end,
             samples,
             sun,
             moon,
@@ -414,7 +420,7 @@ mod tests {
         let night = NightScene::compute(
             &eph,
             CalendarDate::new(2024, 3, 11),
-            3.0,
+            Zone::fixed_hours(3.0),
             mecca(),
             Sighting::Evening,
             "yallop",
@@ -455,7 +461,7 @@ mod tests {
         let night = NightScene::compute(
             &eph,
             CalendarDate::new(2024, 3, 8),
-            3.0,
+            Zone::iana("Asia/Riyadh").unwrap(),
             mecca(),
             Sighting::Morning,
             "yallop",
@@ -474,10 +480,11 @@ mod tests {
         let day = DayScene::compute(
             &eph,
             CalendarDate::new(2024, 3, 11),
-            0.0,
+            Zone::iana("Europe/London").unwrap(),
             GeoLocation::new(51.5074, -0.1278, 11.0),
         );
         assert_eq!(day.samples.len(), 289);
+        assert_eq!(((day.end - day.start) * 24.0).round(), 24.0);
         // Sunrise 06:20, sunset 18:00 UT (HMNAO/timeanddate: 06:19, 18:00).
         let h = |t: Instant| (t.jd_ut - day.start) * 24.0;
         assert!((h(day.sun.rise.unwrap()) - 6.33).abs() < 0.1);
@@ -496,5 +503,20 @@ mod tests {
         // Full Moon 2024 March 25, 07:00 UT.
         assert!((full.jd_ut - (day.start + 14.29)).abs() < 0.1);
         assert!(day.twilights[0].1.unwrap().jd_ut > day.sun.set.unwrap().jd_ut);
+    }
+
+    #[test]
+    fn day_across_the_bst_change_lasts_23_hours() {
+        let eph = MeeusEphemeris::new();
+        let london = GeoLocation::new(51.5074, -0.1278, 11.0);
+        let zone = Zone::iana("Europe/London").unwrap();
+        let day = DayScene::compute(&eph, CalendarDate::new(2024, 3, 31), zone, london);
+        assert!((day.end - day.start - 23.0 / 24.0).abs() < 1e-9);
+        assert_eq!(day.samples.len(), 23 * 12 + 1);
+        // Sunrise 05:39 UT (06:39 BST), so after the change.
+        let rise = day.sun.rise.unwrap().jd_ut;
+        assert_eq!(zone.offset_hours(rise), 1.0);
+        let local_h = (zone.to_local(rise) + 0.5).fract() * 24.0;
+        assert!((local_h - 6.65).abs() < 0.1, "{local_h}");
     }
 }

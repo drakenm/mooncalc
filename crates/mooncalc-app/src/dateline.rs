@@ -137,6 +137,7 @@ mod tests {
             &LocationReportParams {
                 date: DATE.into(),
                 tz_offset_hours: tz,
+                time_zone: None,
                 location: Location {
                     lat_deg: lat,
                     lon_deg: lon,

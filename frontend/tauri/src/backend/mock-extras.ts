@@ -343,7 +343,7 @@ export const mockTablesApi: TablesApi = {
         astronomical: { dawn: localUt(date, 4.9, p.tzOffsetHours), dusk: localUt(date, 19.5, p.tzOffsetHours) },
       });
     }
-    return { year: p.year, month: p.month, tzOffsetHours: p.tzOffsetHours, location: p.location, days, ephemeris: 'Mock' };
+    return { year: p.year, month: p.month, tzOffsetHours: p.tzOffsetHours, timeZone: p.timeZone ?? null, location: p.location, days, ephemeris: 'Mock' };
   },
   lunarPhases: async (p) => {
     const jd0 = civilToJdn({ year: p.year, month: 1, day: 1 }) - 0.5;

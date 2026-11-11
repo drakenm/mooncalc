@@ -21,6 +21,7 @@ use mooncalc_app::dto::{
 };
 use mooncalc_app::earliest::EarliestJob;
 use mooncalc_app::map::{MapJob, MapOutput};
+use mooncalc_app::zone::{self, ZoneOffsets, ZoneOffsetsParams};
 use mooncalc_app::{atlas, basemap, criteria, info, report};
 use tauri::State;
 use tauri::async_runtime::spawn_blocking;
@@ -222,6 +223,21 @@ pub async fn search_cities(params: CitySearchParams) -> Result<Vec<City>, ApiErr
 pub async fn nearest_city(params: NearestCityParams) -> Result<Option<NearestCity>, ApiError> {
     trace("nearest_city");
     blocking(move || atlas::nearest_city(&params)).await
+}
+
+/// A time zone's offset changes over a span of years, so the frontend can
+/// show any instant in local time (see `mooncalc_app::zone`).
+#[tauri::command]
+pub async fn time_zone_offsets(params: ZoneOffsetsParams) -> Result<ZoneOffsets, ApiError> {
+    trace("time_zone_offsets");
+    blocking(move || zone::time_zone_offsets(&params)).await
+}
+
+/// Every IANA time-zone name in the embedded database.
+#[tauri::command]
+pub async fn time_zone_names() -> Result<Vec<String>, ApiError> {
+    trace("time_zone_names");
+    blocking(|| Ok(zone::time_zone_names())).await
 }
 
 /// Earliest-sighting scan after the conjunction nearest a date, each

@@ -12,7 +12,6 @@ GitHub issues can't be filed from this environment yet: the `gh` CLI is authenti
 | core | Automate refreshing the observed ΔT table (`deltat::IERS`). | core-foundation |
 | core | Moon light time (about 0.7″) is neglected in the Meeus backend, as in Meeus. | core-foundation |
 | atlas | Search for non-Latin script names (Arabic etc.); only Latin alternate names are embedded. | atlas |
-| atlas | Time-zone offsets are fixed 2026 values; historical dates need real tz rules. | atlas |
 | maps | SVG zones are staircase rects; contour tracing would make them smooth. | maps-render |
 | maps | Tiny coastline dot on the opposite edge at the antimeridian; raster globe limb antialiasing. | maps-render |
 | hijri | KACST revisions to the 1451–1500 projections. (The strict 29th-day Umm al-Qura rule is now `mooncalc_visibility::calendar::UmmAlQuraRule`.) | hijri |
@@ -32,12 +31,13 @@ GitHub issues can't be filed from this environment yet: the `gh` CLI is authenti
 | app | The two frontends word a report differently: egui's outcome sentences (with lag and age) and short no-verdict reasons live in `tabs/report.rs`, Tauri shows the service's `statusText` and its own `STATUS_LABEL`; map cell status labels are likewise duplicated. Move one wording into `mooncalc-app` for both. | gui on app services |
 | app | A 0.25° map with values is about 4.2 MB of JSON (1.4 MB zones, 2.8 MB 16-bit values as base64). Fine over Tauri IPC (decode about 30 ms), but a binary transport (Tauri `ipc::Response`, WASM shared memory) would halve it. | app services |
 | tauri | Native file pickers for the DE440 path and PNG export (needs `tauri-plugin-dialog`); today the path is typed and PNGs go to the Downloads folder. | app services |
-| app | The report anchors the day at civil noon of a fixed UT offset; derive the offset (with DST) from the city's IANA zone in Rust for historical dates. | app services |
 | tauri | Map evaluation scales about 6x on 24 threads (0.25° world grid, measured while other builds ran); profile per-cell cost and thread scaling on an idle machine. | app services |
 | gui | Ephemeris-tab jobs are keyed on backend choice and path, so `backend::reload()` of the same DE440 file doesn't refresh open views. | gui ephemeris + moon |
 | gui | Moon-tab crater coordinates are rounded (about 0.5°) and mare outlines are schematic. | gui ephemeris + moon |
 | tauri | Ephemeris table requests are capped at 10,000 rows (1,500 drawn); concurrent calendar requests can compute the same missing year twice. | tauri calendar + ephemeris |
-| app | Both frontends use a fixed UT offset with no DST rules, so local times on dates across a DST change are off by an hour. | tauri calendar + ephemeris |
+| atlas | GeoNames still lists Namibian winter time (Africa/Windhoek UTC+1/+2) in the atlas's std/DST offsets; tzdb has UTC+2 all year since 2017. Only the search-result offset labels use the GeoNames values; local times use tzdb. Regenerate the atlas when GeoNames updates. | iana time zones |
+| tz | Local times use the embedded tzdb 2026e (`jiff-tzdb` 0.1.9). Bump it when IANA publishes rule changes (`tools/tz/README.md`). UTC is taken as UT (< 0.9 s). The egui ephemeris table's daily equation of time and the Tauri mock's Intl zone table (1970–2060) are approximations. | iana time zones |
+| tauri | The frontend's zone table (`time_zone_offsets`, 1800–2500) is about 80 KB of JSON for zones with DST, fetched once per zone. A compact array form would shrink it. | iana time zones |
 | fixtures | Odeh Table VI is missing 159 naked-eye rows (V > 8.18). ICOP records weren't extractable. | validation |
 | licensing | Confirm that committing the Yallop (Crown copyright) and Odeh (Springer) tables as test data is acceptable before the repository goes public. | validation |
 | hijri | A computed calendar returns `None` for a whole year when the year before it is not fully covered by the ephemeris (the chain merge needs it), e.g. 1266 AH with DE440s, although its later months are covered. | integration review |

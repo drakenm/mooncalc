@@ -10,7 +10,14 @@ import {
   type LocationReport,
   type UtDateTime,
 } from '../backend';
-import { changed, localDate, type Store } from '../state';
+import { changed, localDate, type Store, zoneParams } from '../state';
+import { type Tz, tzOf } from '../zone';
+
+/** `BST (UT+1)` / `UT+3`: the report's zone abbreviation and offset at noon. */
+function zoneAbbrevAtNoon(r: LocationReport): string {
+  const offset = formatOffset(r.tzOffsetHours);
+  return /^[A-Za-z]+$/.test(r.zoneAbbreviation) ? `${r.zoneAbbreviation} (${offset})` : offset;
+}
 import { debounce, h, replaceChildren } from './dom';
 import { formatDate, formatLat, formatLon, formatNumber, formatOffset, formatUtDateTime, formatValue } from './format';
 
@@ -54,7 +61,7 @@ export class ReportView {
   ) {
     const refresh = debounce(() => void this.refresh(), 150);
     this.store.subscribe((s, prev) => {
-      if (changed(s, prev, ['instant', 'tzOffsetHours', 'location', 'ephemerisId'])) {
+      if (changed(s, prev, ['instant', 'tzOffsetHours', 'timeZone', 'location', 'ephemerisId'])) {
         this.stale = true;
         if (this.active) refresh();
       } else if (changed(s, prev, ['criterionId', 'crescent', 'locationName']) && this.last) {
@@ -77,7 +84,7 @@ export class ReportView {
     try {
       const report = await this.backend.locationReport({
         date: localDate(s),
-        tzOffsetHours: s.tzOffsetHours,
+        ...zoneParams(s, localDate(s)),
         location: s.location,
         ephemerisId: s.ephemerisId,
       });
@@ -93,7 +100,7 @@ export class ReportView {
 
   private render(r: LocationReport): void {
     const s = this.store.get();
-    const tz = r.tzOffsetHours;
+    const tz = tzOf(s);
     const t = (x: UtDateTime | null) => formatUtDateTime(x, tz);
     const d = r.day;
     const first = s.crescent === 'evening' ? r.evening : r.morning;
@@ -106,7 +113,7 @@ export class ReportView {
         'p',
         { class: 'lead' },
         `${s.locationName ?? 'Custom location'} · ${formatLat(r.location.latDeg, 4)} ${formatLon(r.location.lonDeg, 4)} · ` +
-          `${r.location.elevationM.toFixed(0)} m · local date ${formatDate(r.date)} (${formatOffset(tz)})`,
+          `${r.location.elevationM.toFixed(0)} m · local date ${formatDate(r.date)} (${r.timeZone ? `${r.timeZone}, ${zoneAbbrevAtNoon(r)}` : formatOffset(r.tzOffsetHours)})`,
       ),
       r.mapDateNote ? h('p', { class: 'note map-date-note', role: 'note' }, r.mapDateNote.text) : null,
       h(
@@ -136,7 +143,7 @@ export class ReportView {
     );
   }
 
-  private crescentSection(c: CrescentReport, tz: number, selected: string): HTMLElement {
+  private crescentSection(c: CrescentReport, tz: Tz, selected: string): HTMLElement {
     const t = (x: UtDateTime | null) => formatUtDateTime(x, tz);
     const evening = c.crescent === 'evening';
     const g = c.geometry;
@@ -181,7 +188,7 @@ export class ReportView {
     );
   }
 
-  private criteriaTable(rows: CriterionVerdict[], tz: number, selected: string): HTMLElement {
+  private criteriaTable(rows: CriterionVerdict[], tz: Tz, selected: string): HTMLElement {
     const ref = (id: string) => this.criteria.find((c) => c.id === id)?.reference ?? '';
     return h(
       'table',

@@ -5,6 +5,7 @@
 
 use mooncalc_app::dto::{ApiError, UtDateTime};
 use mooncalc_app::tables::{YEAR_COVERAGE_MARGIN_DAYS, YearParams};
+use mooncalc_atlas::Zone;
 use mooncalc_core::angle::DEG;
 use mooncalc_core::apsides::{Apsis, ApsisKind};
 use mooncalc_core::nodes::{DeclinationExtreme, MaxDeclination, NodeKind, NodePassage};
@@ -31,12 +32,13 @@ fn jd_tt(t: &UtDateTime) -> f64 {
 }
 
 /// The events of local `year` (`mooncalc_app::tables::apsides_nodes`).
-pub fn year_events(eph: &dyn Ephemeris, year: i32, tz: f64) -> Result<YearEvents, ApiError> {
+pub fn year_events(eph: &dyn Ephemeris, year: i32, tz: Zone) -> Result<YearEvents, ApiError> {
     let y = mooncalc_app::tables::apsides_nodes(
         eph,
         &YearParams {
             year,
-            tz_offset_hours: tz,
+            tz_offset_hours: tz.fixed_offset_hours().unwrap_or_default(),
+            time_zone: tz.iana_name().map(str::to_owned),
             ephemeris_id: None,
         },
     )?;
@@ -86,7 +88,7 @@ pub fn year_events(eph: &dyn Ephemeris, year: i32, tz: f64) -> Result<YearEvents
 #[derive(Clone, Debug, PartialEq)]
 struct Request {
     year: i32,
-    tz: f64,
+    tz: Zone,
     eph: EphKey,
 }
 
@@ -108,7 +110,7 @@ impl ApsidesView {
         if visible && self.coverage(tc).is_none() {
             let req = Request {
                 year: self.year.unwrap_or(app_year(tc.settings)),
-                tz: tc.settings.time.tz_offset_hours,
+                tz: tc.settings.time.zone(),
                 eph: EphKey::of(tc.settings),
             };
             let eph = ephemeris(tc.settings);
@@ -122,7 +124,7 @@ impl ApsidesView {
     }
 
     pub fn ui(&mut self, ui: &mut egui::Ui, tc: &mut TabContext<'_>) {
-        let tz = tc.settings.time.tz_offset_hours;
+        let tz = tc.settings.time.zone();
         ui.horizontal_wrapped(|ui| {
             year_picker(ui, &mut self.year, app_year(tc.settings));
         });

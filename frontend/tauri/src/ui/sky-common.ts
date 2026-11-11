@@ -7,7 +7,9 @@
 // counter-clockwise on screen.
 
 import type { UtDateTime } from '../backend';
-import { formatOffset } from './format';
+import { offsetAt, type Tz, utMs, zoneAbbrev } from '../zone';
+
+export { utMs };
 
 export const DEG = Math.PI / 180;
 
@@ -15,14 +17,6 @@ export const norm360 = (d: number): number => ((d % 360) + 360) % 360;
 export const norm180 = (d: number): number => norm360(d + 180) - 180;
 
 // --- Time ---------------------------------------------------------------------
-
-/** Milliseconds since the Unix epoch of a UT date-time. */
-export function utMs(t: UtDateTime): number {
-  const d = new Date(0);
-  d.setUTCFullYear(t.year, t.month - 1, t.day);
-  d.setUTCHours(t.hour, t.minute, 0, Math.round(t.second * 1000));
-  return d.getTime();
-}
 
 export function msToUt(ms: number): UtDateTime {
   const d = new Date(Math.round(ms / 1000) * 1000);
@@ -38,25 +32,29 @@ export function msToUt(ms: number): UtDateTime {
 
 const pad = (n: number) => String(n).padStart(2, '0');
 
-/** "HH:MM" in the zone `tz` hours ahead of UT. */
-export function hm(ms: number, tz: number): string {
-  const d = new Date(ms + tz * 3_600_000);
+/** "HH:MM" in the zone (its offset at that instant). */
+export function hm(ms: number, tz: Tz): string {
+  const d = new Date(ms + tz.offsetAtMs(ms) * 3_600_000);
   return `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
 }
 
 /** "YYYY-MM-DD HH:MM" local. */
-export function dateHm(ms: number, tz: number): string {
-  const d = new Date(ms + tz * 3_600_000);
+export function dateHm(ms: number, tz: Tz): string {
+  const d = new Date(ms + tz.offsetAtMs(ms) * 3_600_000);
   return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
 }
 
-/** "HH:MM UT+3" for an optional UT date-time. */
-export function localHm(t: UtDateTime | null | undefined, tz: number): string {
-  return t ? `${hm(utMs(t), tz)}` : '—';
+/** "HH:MM" local for an optional UT date-time (its own offset when set). */
+export function localHm(t: UtDateTime | null | undefined, tz: Tz): string {
+  if (!t) return '—';
+  const ms = utMs(t);
+  const d = new Date(ms + offsetAt(tz, t) * 3_600_000);
+  return `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
 }
 
-export function zoneLabel(tz: number): string {
-  return formatOffset(tz);
+/** The zone at an instant for labels: `BST`, `UT+3`. */
+export function zoneLabel(tz: Tz, ms: number): string {
+  return zoneAbbrev(tz, ms);
 }
 
 // --- Sampled series ---------------------------------------------------------------

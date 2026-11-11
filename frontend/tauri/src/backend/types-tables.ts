@@ -15,6 +15,9 @@ export interface EphemerisTableParams {
   count: number;
   location?: Location | null;
   ephemerisId?: string | null;
+  /** Zone of the rows' `offsetHours` (IANA, else the fixed offset). */
+  tzOffsetHours?: number;
+  timeZone?: string | null;
 }
 
 export interface TopocentricRow {
@@ -73,7 +76,10 @@ export interface EphemerisTable {
 export interface RiseSetParams {
   year: number;
   month: number;
+  /** Fixed offset from UT, hours, used when `timeZone` is absent. */
   tzOffsetHours: number;
+  /** IANA zone whose rules give the offset on each date; wins over `tzOffsetHours`. */
+  timeZone?: string | null;
   location: Location;
   ephemerisId?: string | null;
 }
@@ -108,7 +114,10 @@ export interface RiseSetDay {
 export interface RiseSetMonth {
   year: number;
   month: number;
+  /** The offset at local civil noon (each time carries its own `offsetHours`). */
   tzOffsetHours: number;
+  /** The IANA zone used, if any. */
+  timeZone: string | null;
   location: Location;
   days: RiseSetDay[];
   ephemeris: string;
@@ -119,6 +128,8 @@ export interface RiseSetMonth {
 export interface YearParams {
   year: number;
   tzOffsetHours?: number;
+  /** IANA zone: the year runs between its local midnights. */
+  timeZone?: string | null;
   ephemerisId?: string | null;
 }
 
@@ -193,6 +204,9 @@ export interface EclipsesParams {
   filter?: EclipseKindFilter;
   location?: Location | null;
   ephemerisId?: string | null;
+  /** Zone of the times' `offsetHours` (IANA, else the fixed offset). */
+  tzOffsetHours?: number;
+  timeZone?: string | null;
 }
 
 export interface SolarContact {

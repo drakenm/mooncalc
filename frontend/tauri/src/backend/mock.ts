@@ -9,6 +9,7 @@ import { BackendError, type Backend } from './backend';
 import { bytesToBase64 } from './codec';
 import { mockSkyApi } from './mock-sky';
 import { mockCalendarApi, mockTablesApi } from './mock-extras';
+import { mockTimeZoneNames, mockTimeZoneOffsets } from './mock-zone';
 import { mapConvention, reportNote } from '../dateline';
 import {
   NO_DATA,
@@ -32,6 +33,8 @@ import {
   type NearestCityParams,
   type PngImage,
   type ZoneLegendEntry,
+  type ZoneOffsets,
+  type ZoneOffsetsParams,
 } from './types';
 
 const zone = (code: string, description: string, rgb: [number, number, number]): ZoneLegendEntry => ({
@@ -213,6 +216,8 @@ export class MockBackend implements Backend {
       location: p.location,
       date: p.date,
       tzOffsetHours: p.tzOffsetHours,
+      timeZone: p.timeZone ?? null,
+      zoneAbbreviation: p.timeZone ?? '',
       ephemeris: 'mock',
       day: { sunrise: null, sunset: null, solarNoon: null, moonrise: null, moonset: null, moonTransit: null, civilDawn: null, civilDusk: null, nauticalDawn: null, nauticalDusk: null },
       moonAgeAtNoonHours: NaN,
@@ -264,6 +269,14 @@ export class MockBackend implements Backend {
 
   async loadDe440(_p: LoadDe440Params): Promise<EphemerisBackendInfo> {
     throw unsupported('DE440');
+  }
+
+  async timeZoneOffsets(p: ZoneOffsetsParams): Promise<ZoneOffsets> {
+    return mockTimeZoneOffsets(p);
+  }
+
+  async timeZoneNames(): Promise<string[]> {
+    return mockTimeZoneNames();
   }
 
   readonly sky = mockSkyApi();

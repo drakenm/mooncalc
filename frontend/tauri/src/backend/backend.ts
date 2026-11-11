@@ -28,6 +28,8 @@ import type {
   NearestCityParams,
   PngImage,
   SavedFile,
+  ZoneOffsets,
+  ZoneOffsetsParams,
 } from './types';
 import type { SkyApi } from './types-sky';
 import type { CalendarApi } from './types-calendar';
@@ -53,6 +55,10 @@ export interface Backend {
   earliestSighting(params: EarliestParams): Promise<EarliestResult>;
   basemap(params: BasemapParams): Promise<Basemap>;
   loadDe440(params: LoadDe440Params): Promise<EphemerisBackendInfo>;
+  /** A zone's offset changes over a span of years (IANA Time Zone Database). */
+  timeZoneOffsets(params: ZoneOffsetsParams): Promise<ZoneOffsets>;
+  /** Every IANA zone name the backend knows, sorted. */
+  timeZoneNames(): Promise<string[]>;
   /** Sky, Trajectory and Moon tabs. */
   readonly sky: SkyApi;
 }

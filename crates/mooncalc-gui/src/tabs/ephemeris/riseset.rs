@@ -9,6 +9,7 @@
 
 use mooncalc_app::dto::{ApiError, Location, UtDateTime};
 use mooncalc_app::tables::{AngledEventDto, BodyDayDto, RiseSetParams, TwilightDto};
+use mooncalc_atlas::Zone;
 use mooncalc_core::angle::DEG;
 use mooncalc_core::events::{CalendarDate, Circumpolar};
 use mooncalc_core::{Ephemeris, GeoLocation, Instant};
@@ -67,7 +68,7 @@ pub struct DayRow {
 struct Request {
     year: i32,
     month: u32,
-    tz: f64,
+    tz: Zone,
     location: (f64, f64, f64),
     eph: EphKey,
 }
@@ -101,14 +102,15 @@ pub fn month_rows(
     loc: &GeoLocation,
     year: i32,
     month: u32,
-    tz: f64,
+    tz: Zone,
 ) -> Result<Vec<DayRow>, ApiError> {
     let m = mooncalc_app::tables::rise_set_month(
         eph,
         &RiseSetParams {
             year,
             month,
-            tz_offset_hours: tz,
+            tz_offset_hours: tz.fixed_offset_hours().unwrap_or_default(),
+            time_zone: tz.iana_name().map(str::to_owned),
             location: Location {
                 lat_deg: loc.lat_deg,
                 lon_deg: loc.lon_deg,
@@ -149,8 +151,8 @@ impl RiseSetView {
     /// The month's days, with the interpolation table's day either side.
     fn coverage(&self, tc: &TabContext<'_>) -> Option<String> {
         let (year, month) = self.year_month(tc);
-        let tz = tc.settings.time.tz_offset_hours;
-        let (start, _) = CalendarDate::new(year, month, 1).local_day(tz);
+        let tz = tc.settings.time.zone();
+        let (start, _) = tz.day_bounds(CalendarDate::new(year, month, 1));
         let days = f64::from(days_in_month(year, month));
         coverage(
             tc.settings,
@@ -168,7 +170,7 @@ impl RiseSetView {
             let req = Request {
                 year,
                 month,
-                tz: tc.settings.time.tz_offset_hours,
+                tz: tc.settings.time.zone(),
                 location: (l.lat_deg, l.lon_deg, l.elevation_m),
                 eph: EphKey::of(tc.settings),
             };
@@ -185,7 +187,7 @@ impl RiseSetView {
     }
 
     pub fn ui(&mut self, ui: &mut egui::Ui, tc: &mut TabContext<'_>) {
-        let tz = tc.settings.time.tz_offset_hours;
+        let tz = tc.settings.time.zone();
         let (mut year, mut month) = self.year_month(tc);
         ui.horizontal_wrapped(|ui| {
             if ui
@@ -289,7 +291,7 @@ impl RiseSetView {
     }
 }
 
-fn body_cells(ui: &mut egui::Ui, d: &BodyDay, tz: f64, clicked: &mut Option<Instant>) {
+fn body_cells(ui: &mut egui::Ui, d: &BodyDay, tz: Zone, clicked: &mut Option<Instant>) {
     for (ev, azimuth) in [(d.rise, true), (d.transit, false), (d.set, true)] {
         match ev {
             Some((t, a)) => {
@@ -323,7 +325,7 @@ mod tests {
     fn makkah_march_2024() {
         let eph = MeeusEphemeris::new();
         let loc = GeoLocation::new(21.4225, 39.8262, 0.0);
-        let rows = month_rows(&eph, &loc, 2024, 3, 3.0).unwrap();
+        let rows = month_rows(&eph, &loc, 2024, 3, Zone::fixed_hours(3.0)).unwrap();
         assert_eq!(rows.len(), 31);
         let r = &rows[10]; // 2024-03-11
         assert_eq!(r.date, CalendarDate::new(2024, 3, 11));
@@ -331,8 +333,8 @@ mod tests {
         // azimuths near 93°/267°.
         let (rise, az) = r.sun.rise.unwrap();
         let (set, saz) = r.sun.set.unwrap();
-        assert_eq!(format::time_hm(rise, 3.0)[..2], *"06");
-        assert_eq!(format::time_hm(set, 3.0)[..2], *"18");
+        assert_eq!(format::time_hm(rise, Zone::fixed_hours(3.0))[..2], *"06");
+        assert_eq!(format::time_hm(set, Zone::fixed_hours(3.0))[..2], *"18");
         assert!((az.to_degrees() - 93.0).abs() < 3.0, "{}", az.to_degrees());
         assert!((saz.to_degrees() - 267.0).abs() < 3.0);
         // Twilights are ordered around sunrise and sunset.

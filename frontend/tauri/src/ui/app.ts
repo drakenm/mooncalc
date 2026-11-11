@@ -13,6 +13,7 @@ import { MoonTabView } from './moon-view';
 import { SkyView } from './sky-view';
 import { TrajectoryView } from './trajectory-view';
 import { createSidebar } from './sidebar';
+import { dateMs, localToUtMs, tzOf } from '../zone';
 
 type TabId = 'map' | 'report' | 'earliest' | 'ephemeris' | 'calendar' | 'sky' | 'moon' | 'trajectory' | 'about';
 
@@ -51,7 +52,8 @@ export function createApp(ctx: AppContext): HTMLElement {
         criteria: ctx.criteria,
         showMap: (date, latDeg, lonDeg) => {
           // Noon local time on that date, so the map shows its evening.
-          const utMinutes = Math.round((12 - ctx.store.get().tzOffsetHours) * 60);
+          const noonMs = localToUtMs(tzOf(ctx.store.get()), dateMs(date) + 12 * 3_600_000);
+          const utMinutes = Math.round((noonMs - dateMs(date)) / 60_000);
           const dayShift = Math.floor(utMinutes / 1440);
           const minuteOfDay = utMinutes - dayShift * 1440;
           const base = new Date(0);

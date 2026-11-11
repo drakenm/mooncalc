@@ -32,7 +32,8 @@ Debug builds compile the workspace crates without optimisation, so maps are seve
 | `src/backend/tauri-extras.ts`, `mock-extras.ts` | Their Tauri bindings, and in-browser stand-ins (tabular arithmetic, mean motions, canned 2024 eclipses). |
 | `src/backend/types-sky.ts`, `tauri-sky.ts`, `mock-sky.ts` | Sky, Trajectory and Moon wire types and the `SkyApi` interface (`backend.sky`), mirroring `crates/mooncalc-app/src/{sky/mod,trajectory,moon/mod}.rs`; its Tauri binding; and a low-precision in-browser model (Astronomical Almanac Sun and Moon, optical libration, a few bright stars). |
 | `src/backend/index.ts` | `createBackend()` picks a transport at startup and loads it lazily. |
-| `src/state.ts` | Observable app state (date/time, location, criterion, ...). |
+| `src/state.ts` | Observable app state (date/time, time zone, location, criterion, ...). |
+| `src/zone.ts` | Time zones: an IANA zone's offset table from `time_zone_offsets` (Rust's embedded IANA Time Zone Database; the mock builds one from `Intl`), looked up for any instant, local to UT across DST gaps and folds, or a fixed offset. A zone's table is loaded before the state names it. |
 | `src/dateline.ts` | The map date line versus the civil date: a mirror of `mooncalc_core::events::mean_time_day_shift` and the `mooncalc_app::dateline` wording, for the map's observer note (the report's note comes from Rust). |
 | `src/ui/` | Sidebar, tab shell, map canvas (`map-view.ts`, `map-image.ts`, `basemap-layer.ts`), report, earliest sighting, Calendar (`calendar-view.ts`), Ephemeris (`ephemeris-*.ts`), Sky (`sky-view.ts`), Trajectory (`trajectory-view.ts`), Moon (`moon-view.ts`) with shared canvas helpers in `sky-common.ts`, About. |
 

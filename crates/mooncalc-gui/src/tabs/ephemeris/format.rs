@@ -4,6 +4,8 @@
 use mooncalc_core::Instant;
 use mooncalc_core::angle::DEG;
 
+use mooncalc_atlas::Zone;
+
 use crate::datetime::format_utc_offset;
 
 /// Angle notation of table cells.
@@ -41,50 +43,52 @@ fn split_seconds(jd_local: f64, decimals: u32) -> (i32, u32, u32, u32, u32, f64)
     (c.year, c.month, c.day, h as u32, m as u32, s)
 }
 
-/// `YYYY-MM-DD HH:MM` in a zone `tz_hours` ahead of UT.
-pub fn date_time(t: Instant, tz_hours: f64) -> String {
-    let (y, mo, d, h, mi, _) = split_seconds_minute(t, tz_hours);
+/// `YYYY-MM-DD HH:MM` in zone `tz` (its offset at `t`).
+pub fn date_time(t: Instant, tz: Zone) -> String {
+    let (y, mo, d, h, mi, _) = split_seconds_minute(t, tz);
     format!("{y:04}-{mo:02}-{d:02} {h:02}:{mi:02}")
 }
 
-/// `YYYY-MM-DD HH:MM:SS` in a zone `tz_hours` ahead of UT.
-pub fn date_time_seconds(t: Instant, tz_hours: f64) -> String {
-    let (y, mo, d, h, mi, s) = split_seconds(t.jd_ut + tz_hours / 24.0, 0);
+/// `YYYY-MM-DD HH:MM:SS` in zone `tz`.
+pub fn date_time_seconds(t: Instant, tz: Zone) -> String {
+    let (y, mo, d, h, mi, s) = split_seconds(tz.to_local(t.jd_ut), 0);
     format!("{y:04}-{mo:02}-{d:02} {h:02}:{mi:02}:{:02}", s as u32)
 }
 
-/// `HH:MM` in a zone `tz_hours` ahead of UT.
-pub fn time_hm(t: Instant, tz_hours: f64) -> String {
-    let (_, _, _, h, mi, _) = split_seconds_minute(t, tz_hours);
+/// `HH:MM` in zone `tz`.
+pub fn time_hm(t: Instant, tz: Zone) -> String {
+    let (_, _, _, h, mi, _) = split_seconds_minute(t, tz);
     format!("{h:02}:{mi:02}")
 }
 
-/// `YYYY-MM-DD` of `t` in a zone `tz_hours` ahead of UT (minute-rounded,
-/// consistent with [`time_hm`]).
-pub fn date(t: Instant, tz_hours: f64) -> String {
-    let (y, mo, d, _, _, _) = split_seconds_minute(t, tz_hours);
+/// `YYYY-MM-DD` of `t` in zone `tz` (minute-rounded, consistent with
+/// [`time_hm`]).
+pub fn date(t: Instant, tz: Zone) -> String {
+    let (y, mo, d, _, _, _) = split_seconds_minute(t, tz);
     format!("{y:04}-{mo:02}-{d:02}")
 }
 
-fn split_seconds_minute(t: Instant, tz_hours: f64) -> (i32, u32, u32, u32, u32, f64) {
+fn split_seconds_minute(t: Instant, tz: Zone) -> (i32, u32, u32, u32, u32, f64) {
     // Round to the minute first so that 23:59:40 shows as the next day 00:00.
-    let jd = t.jd_ut + tz_hours / 24.0;
+    let jd = tz.to_local(t.jd_ut);
     let minutes = ((jd + 0.5) * 1440.0).round();
     split_seconds(minutes / 1440.0 - 0.5, 0)
 }
 
-/// The zone label for headers, e.g. `UTC+03:00`, or `UT` for offset 0.
-pub fn zone_label(tz_hours: f64) -> String {
-    if tz_hours == 0.0 {
-        "UT".into()
-    } else {
-        format_utc_offset(tz_hours)
+/// The zone label for headers: `UT` for offset 0, `UTC+03:00` for a fixed
+/// offset, the IANA name (`Europe/London`) for a zone, whose offset varies.
+pub fn zone_label(tz: Zone) -> String {
+    match tz.iana_name() {
+        Some(name) => name.to_owned(),
+        None if tz == Zone::UTC => "UT".into(),
+        None => format_utc_offset(tz.fixed_offset_hours().unwrap_or_default()),
     }
 }
 
 /// Parse `YYYY-MM-DD HH:MM` (or `YYYY-MM-DD`, optionally with `:SS`) as a
-/// local time `tz_hours` ahead of UT.
-pub fn parse_date_time(text: &str, tz_hours: f64) -> Option<Instant> {
+/// local time in `tz`. A time skipped by a DST change moves forward by the
+/// gap; a repeated one is taken at its first occurrence.
+pub fn parse_date_time(text: &str, tz: Zone) -> Option<Instant> {
     let text = text.trim();
     let (date, time) = match text.split_once([' ', 'T']) {
         Some((d, t)) => (d, t.trim()),
@@ -115,7 +119,7 @@ pub fn parse_date_time(text: &str, tz_hours: f64) -> Option<Instant> {
         }
     }
     let local = Instant::from_calendar(year, month, day, hour, minute, second);
-    Some(local.add_days(-tz_hours / 24.0))
+    Some(Instant::from_jd_ut(tz.to_ut(local.jd_ut)))
 }
 
 /// Split a non-negative value into whole units, minutes and seconds
@@ -221,30 +225,39 @@ mod tests {
     #[test]
     fn times_in_zones() {
         let t = Instant::from_calendar(2024, 4, 8, 18, 17, 40.0);
-        assert_eq!(date_time(t, 0.0), "2024-04-08 18:18");
-        assert_eq!(date_time_seconds(t, 0.0), "2024-04-08 18:17:40");
-        assert_eq!(date_time(t, 5.75), "2024-04-09 00:03");
-        assert_eq!(time_hm(t, -6.0), "12:18");
+        assert_eq!(date_time(t, Zone::fixed_hours(0.0)), "2024-04-08 18:18");
+        assert_eq!(
+            date_time_seconds(t, Zone::fixed_hours(0.0)),
+            "2024-04-08 18:17:40"
+        );
+        assert_eq!(date_time(t, Zone::fixed_hours(5.75)), "2024-04-09 00:03");
+        assert_eq!(time_hm(t, Zone::fixed_hours(-6.0)), "12:18");
         // Minute rounding carries over midnight into the next date.
         let late = Instant::from_calendar(2024, 12, 31, 23, 59, 45.0);
-        assert_eq!(date_time(late, 0.0), "2025-01-01 00:00");
-        assert_eq!(date(late, 0.0), "2025-01-01");
-        assert_eq!(zone_label(0.0), "UT");
-        assert_eq!(zone_label(3.0), "UTC+03:00");
+        assert_eq!(date_time(late, Zone::fixed_hours(0.0)), "2025-01-01 00:00");
+        assert_eq!(date(late, Zone::fixed_hours(0.0)), "2025-01-01");
+        assert_eq!(zone_label(Zone::fixed_hours(0.0)), "UT");
+        assert_eq!(zone_label(Zone::fixed_hours(3.0)), "UTC+03:00");
     }
 
     #[test]
     fn parse_round_trips() {
-        let t = parse_date_time("2024-03-11 19:05", 3.0).unwrap();
-        assert_eq!(date_time(t, 3.0), "2024-03-11 19:05");
-        assert_eq!(date_time(t, 0.0), "2024-03-11 16:05");
-        assert!(parse_date_time("2024-02-30 10:00", 0.0).is_none());
-        assert!(parse_date_time("2024-13-01", 0.0).is_none());
-        assert!(parse_date_time("2024-01-01 24:00", 0.0).is_none());
-        let d = parse_date_time("2024-01-01", 0.0).unwrap();
-        assert_eq!(date_time_seconds(d, 0.0), "2024-01-01 00:00:00");
-        let s = parse_date_time("2024-01-01T01:02:03", 0.0).unwrap();
-        assert_eq!(date_time_seconds(s, 0.0), "2024-01-01 01:02:03");
+        let t = parse_date_time("2024-03-11 19:05", Zone::fixed_hours(3.0)).unwrap();
+        assert_eq!(date_time(t, Zone::fixed_hours(3.0)), "2024-03-11 19:05");
+        assert_eq!(date_time(t, Zone::fixed_hours(0.0)), "2024-03-11 16:05");
+        assert!(parse_date_time("2024-02-30 10:00", Zone::fixed_hours(0.0)).is_none());
+        assert!(parse_date_time("2024-13-01", Zone::fixed_hours(0.0)).is_none());
+        assert!(parse_date_time("2024-01-01 24:00", Zone::fixed_hours(0.0)).is_none());
+        let d = parse_date_time("2024-01-01", Zone::fixed_hours(0.0)).unwrap();
+        assert_eq!(
+            date_time_seconds(d, Zone::fixed_hours(0.0)),
+            "2024-01-01 00:00:00"
+        );
+        let s = parse_date_time("2024-01-01T01:02:03", Zone::fixed_hours(0.0)).unwrap();
+        assert_eq!(
+            date_time_seconds(s, Zone::fixed_hours(0.0)),
+            "2024-01-01 01:02:03"
+        );
     }
 
     #[test]
@@ -273,5 +286,23 @@ mod tests {
         assert_eq!(duration_min(4.25), "4m 15s");
         assert_eq!(signed_minutes(-14.2), "−14m 12s");
         assert_eq!(signed_minutes(16.4), "+16m 24s");
+    }
+
+    #[test]
+    fn zone_times_follow_dst() {
+        let ny = Zone::iana("America/New_York").unwrap();
+        assert_eq!(zone_label(ny), "America/New_York");
+        assert_eq!(zone_label(Zone::UTC), "UT");
+        assert_eq!(zone_label(Zone::fixed_hours(5.5)), "UTC+05:30");
+        // 2024-03-10 06:30 and 07:30 UT: 01:30 EST, then 03:30 EDT.
+        let t = Instant::from_calendar(2024, 3, 10, 6, 30, 0.0);
+        assert_eq!(date_time(t, ny), "2024-03-10 01:30");
+        assert_eq!(date_time(t.add_days(1.0 / 24.0), ny), "2024-03-10 03:30");
+        // 02:30 was skipped: it parses as 03:30 EDT.
+        let gap = parse_date_time("2024-03-10 02:30", ny).unwrap();
+        assert_eq!(date_time_seconds(gap, Zone::UTC), "2024-03-10 07:30:00");
+        // 01:30 on 3 November happened twice: the first is EDT.
+        let fold = parse_date_time("2024-11-03 01:30", ny).unwrap();
+        assert_eq!(date_time_seconds(fold, Zone::UTC), "2024-11-03 05:30:00");
     }
 }

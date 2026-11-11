@@ -2,6 +2,7 @@
 //! configurable start, step and count, with selectable columns, shown in a
 //! virtualised table and copyable as CSV/TSV.
 
+use mooncalc_atlas::Zone;
 use std::sync::Arc;
 
 use egui_extras::{Column, TableBuilder};
@@ -326,7 +327,7 @@ struct Request {
 pub struct TableView {
     job: CachedJob<Request, Arc<Vec<EphemerisRow>>>,
     start_text: String,
-    start_text_for: Option<(f64, f64)>,
+    start_text_for: Option<(f64, Zone)>,
     start_error: bool,
 }
 
@@ -394,7 +395,7 @@ impl TableView {
     }
 
     pub fn ui(&mut self, ui: &mut egui::Ui, tc: &mut TabContext<'_>) {
-        let tz = tc.settings.time.tz_offset_hours;
+        let tz = tc.settings.time.zone();
         self.controls(ui, tc, tz);
         if let Some(problem) = Self::coverage(tc) {
             coverage_notice(ui, &problem);
@@ -471,7 +472,7 @@ impl TableView {
         }
     }
 
-    fn controls(&mut self, ui: &mut egui::Ui, tc: &mut TabContext<'_>, tz: f64) {
+    fn controls(&mut self, ui: &mut egui::Ui, tc: &mut TabContext<'_>, tz: Zone) {
         let start = Self::start(tc);
         let s = &mut tc.settings.ephemeris_tab.table;
         ui.horizontal_wrapped(|ui| {
@@ -582,7 +583,7 @@ pub fn delimited(
     rows: &[EphemerisRow],
     cols: &[Col],
     style: AngleStyle,
-    tz: f64,
+    tz: Zone,
     sep: char,
 ) -> String {
     let quote = |s: String| -> String {
@@ -623,12 +624,18 @@ mod tests {
         let start = Instant::from_calendar(2024, 4, 8, 0, 0, 0.0);
         let rows = ephemeris_table(&eph, start, 1.0 / 24.0, 3, &opts);
         let cols = Col::ALL.to_vec();
-        let csv = delimited(&rows, &cols, AngleStyle::Sexagesimal, 3.0, ',');
+        let csv = delimited(
+            &rows,
+            &cols,
+            AngleStyle::Sexagesimal,
+            Zone::fixed_hours(3.0),
+            ',',
+        );
         let lines: Vec<&str> = csv.lines().collect();
         assert_eq!(lines.len(), 4);
         assert!(lines[0].starts_with("Date/time (UTC+03:00),JD (UT),Sun RA"));
         assert!(lines[1].starts_with("2024-04-08 03:00:00,2460408.50000,"));
-        let tsv = delimited(&rows, &cols, AngleStyle::Decimal, 0.0, '\t');
+        let tsv = delimited(&rows, &cols, AngleStyle::Decimal, Zone::UTC, '\t');
         for line in tsv.lines() {
             assert_eq!(line.split('\t').count(), cols.len() + 1);
         }

@@ -2,6 +2,13 @@
 
 import type { CivilDate, UtDateTime } from '../backend';
 
+/** The zone of `formatUtDateTime`: structurally `zone.ts`'s `Tz`. */
+interface ZoneLike {
+  readonly name: string | null;
+  offsetAtMs(ms: number): number;
+  abbrevAtMs(ms: number): string;
+}
+
 const pad = (n: number, w = 2) => String(Math.trunc(n)).padStart(w, '0');
 
 export function formatLat(latDeg: number, digits = 2): string {
@@ -91,37 +98,26 @@ export function shiftHours(t: UtDateTime, hours: number): UtDateTime {
   };
 }
 
-/** "2024-03-10 18:42 UT (21:42 UT+3)", rounded to the nearest minute. */
-export function formatUtDateTime(t: UtDateTime | null, tzOffsetHours?: number): string {
+/**
+ * "2024-03-10 18:42 UT (21:42 UT+3)" or "… (19:42 BST)", rounded to the
+ * nearest minute: the local time uses the offset at that instant (the
+ * time's own `offsetHours` when a zone-aware service set it).
+ */
+export function formatUtDateTime(t: UtDateTime | null, tz?: ZoneLike): string {
   if (!t) return '—';
   const r = roundToMinute(t);
   const ut = `${formatDate(r)} ${formatTime(r)} UT`;
-  if (tzOffsetHours === undefined || tzOffsetHours === 0) return ut;
-  const local = shiftHours(r, tzOffsetHours);
-  return `${ut} (${formatTime(local)} ${formatOffset(tzOffsetHours)})`;
+  if (!tz) return ut;
+  const ms = utToDate(t).getTime();
+  const offset = t.offsetHours ?? tz.offsetAtMs(ms);
+  if (offset === 0 && !tz.name) return ut;
+  const local = shiftHours(r, offset);
+  const abbrev = tz.name && /^[A-Za-z]+$/.test(tz.abbrevAtMs(ms)) ? tz.abbrevAtMs(ms) : formatOffset(offset);
+  return `${ut} (${formatTime(local)} ${abbrev})`;
 }
 
 export function formatNumber(v: number | null | undefined, digits: number, unit = ''): string {
   return v === null || v === undefined || !Number.isFinite(v) ? '—' : `${v.toFixed(digits)}${unit}`;
-}
-
-/**
- * The UT offset, in hours, of an IANA time zone at a given moment, or null if
- * this browser does not know the zone.
- */
-export function zoneOffsetHours(timeZone: string, at: Date): number | null {
-  try {
-    const part = new Intl.DateTimeFormat('en-US', { timeZone, timeZoneName: 'longOffset' })
-      .formatToParts(at)
-      .find((p) => p.type === 'timeZoneName')?.value;
-    if (!part || part === 'GMT') return 0;
-    const m = /GMT([+-])(\d{1,2})(?::(\d{2}))?/.exec(part);
-    if (!m) return null;
-    const hours = Number(m[2]) + Number(m[3] ?? 0) / 60;
-    return m[1] === '-' ? -hours : hours;
-  } catch {
-    return null;
-  }
 }
 
 /** The symbol of a criterion's value: Yallop's q, Odeh's V, else "value". */

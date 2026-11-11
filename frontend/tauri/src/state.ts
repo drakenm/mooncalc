@@ -1,12 +1,17 @@
 // Application state shared by the sidebar and the tabs.
 
 import type { CivilDate, Crescent, Location, UtDateTime } from './backend';
+import { localDateOf, noonOffset, tzOf } from './zone';
 
 export interface AppState {
   /** Date and time of interest, UT (seconds kept at 0 by the UI). */
   instant: UtDateTime;
-  /** Local time offset from UT, hours; display only. */
+  /** Fixed offset of local time from UT, hours, used when `timeZone` is null. */
   tzOffsetHours: number;
+  /** IANA time zone, whose rules (DST, history) give the offset at each
+   * instant; null for the fixed offset. Choosing a city sets it. Its offset
+   * table is loaded (`zone.ts`) before the state names it. */
+  timeZone: string | null;
   location: Location;
   /** Name of the selected city, cleared when coordinates are edited. */
   locationName: string | null;
@@ -39,6 +44,7 @@ export function defaultState(): AppState {
   return {
     instant: nowUt(),
     tzOffsetHours: 3,
+    timeZone: 'Asia/Riyadh',
     location: { latDeg: 21.4225, lonDeg: 39.8262, elevationM: 277 },
     locationName: 'Makkah, Saudi Arabia',
     criterionId: 'yallop',
@@ -81,6 +87,8 @@ export class Store {
       if (!raw) return {};
       const saved = JSON.parse(raw) as Partial<AppState>;
       delete saved.instant;
+      // Saved before zones existed: keep the fixed offset.
+      if (!('timeZone' in saved)) saved.timeZone = null;
       return saved;
     } catch {
       return {};
@@ -97,15 +105,19 @@ export class Store {
 }
 
 /**
- * The local civil date of the selected instant (UT shifted by the time-zone
- * offset): the date whose evening the map and the report show.
+ * The local civil date of the selected instant (UT shifted by the zone's
+ * offset then): the date whose evening the map and the report show.
  */
-export function localDate(s: Pick<AppState, 'instant' | 'tzOffsetHours'>): CivilDate {
-  const minutes = s.instant.hour * 60 + s.instant.minute + Math.round(s.tzOffsetHours * 60);
-  const dayShift = Math.floor(minutes / 1440);
-  const base = new Date(0);
-  base.setUTCFullYear(s.instant.year, s.instant.month - 1, s.instant.day + dayShift);
-  return { year: base.getUTCFullYear(), month: base.getUTCMonth() + 1, day: base.getUTCDate() };
+export function localDate(s: Pick<AppState, 'instant' | 'tzOffsetHours' | 'timeZone'>): CivilDate {
+  return localDateOf(tzOf(s), s.instant);
+}
+
+/**
+ * The time-zone fields of a request about local date `date`: the IANA zone,
+ * and as the fixed fallback the zone's offset at civil noon of that date.
+ */
+export function zoneParams(s: Pick<AppState, 'tzOffsetHours' | 'timeZone'>, date: CivilDate): { tzOffsetHours: number; timeZone: string | null } {
+  return { tzOffsetHours: noonOffset(tzOf(s), date), timeZone: s.timeZone };
 }
 
 /** Shallow equality on the listed keys, for "did anything relevant change?". */

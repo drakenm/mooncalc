@@ -37,6 +37,7 @@ use crate::dto::{
 };
 use crate::ephemeris::check_covers;
 use crate::validate;
+use crate::zone::{Localize, localize_fields};
 
 /// Ephemeris coverage a report needs either side of civil noon, days: the
 /// nearest new Moon and one lunation either side are searched.
@@ -207,9 +208,10 @@ pub fn location_report(
 ) -> Result<LocationReport, ApiError> {
     validate::date(p.date)?;
     validate::location(p.location)?;
-    validate::tz_offset(p.tz_offset_hours)?;
+    let zone = crate::zone::resolve(p.tz_offset_hours, p.time_zone.as_deref())?;
     let date = CalendarDate::from(p.date);
-    let noon = Instant::from_jd_ut(date.jd0() + 0.5 - p.tz_offset_hours / 24.0);
+    let noon = zone.civil_noon(date);
+    let noon_offset = zone.offset_hours(noon.jd_ut);
     check_covers(
         eph,
         noon.jd_tt() - COVERAGE_MARGIN_DAYS,
@@ -222,7 +224,7 @@ pub fn location_report(
     let settings = Settings::default();
 
     // Rise, set and twilight on the local civil day.
-    let (t0, t1) = date.local_day(p.tz_offset_hours);
+    let (t0, t1) = zone.day_bounds(date);
     let sun = day_events(&table, Body::Sun, &location, Horizon::STANDARD, t0, t1);
     let moon = day_events(&table, Body::Moon, &location, Horizon::STANDARD, t0, t1);
     let (civil_dawn, civil_dusk) = twilight(&table, &location, Twilight::Civil, t0, t1);
@@ -264,18 +266,30 @@ pub fn location_report(
     let evening = crescent_report(&mut cache(Sighting::Evening), Crescent::Evening, *conj);
     let morning = crescent_report(&mut cache(Sighting::Morning), Crescent::Morning, *conj);
 
-    Ok(LocationReport {
+    let mut report = LocationReport {
         location: p.location,
         date: p.date,
-        tz_offset_hours: p.tz_offset_hours,
+        tz_offset_hours: noon_offset,
+        time_zone: zone.iana_name().map(str::to_owned),
+        zone_abbreviation: zone.abbreviation(noon.jd_ut),
         ephemeris: eph.name().to_owned(),
         day,
         moon_age_at_noon_hours: (noon.jd_ut - conj.jd_ut) * 24.0,
         illumination_at_noon: illum.fraction,
         evening,
         morning,
-        map_date_note: crate::dateline::report_note(date, p.location.lon_deg, p.tz_offset_hours),
-    })
+        map_date_note: crate::dateline::report_note(date, p.location.lon_deg, noon_offset),
+    };
+    report.localize(zone);
+    Ok(report)
+}
+
+localize_fields! {
+    LocationReport: day, evening, morning;
+    DayEventsDto: sunrise, sunset, solar_noon, moonrise, moonset, moon_transit, civil_dawn,
+        civil_dusk, nautical_dawn, nautical_dusk;
+    CrescentReport: sun_event, moon_event, best_time, conjunction, geometry_at, criteria;
+    CriterionVerdict: evaluated_at;
 }
 
 #[cfg(test)]
@@ -347,6 +361,7 @@ mod tests {
                         day: d[2],
                     },
                     tz_offset_hours: f[3].parse().unwrap(),
+                    time_zone: None,
                     location: Location {
                         lat_deg: city.lat_deg,
                         lon_deg: city.lon_deg,
@@ -414,6 +429,7 @@ mod tests {
                     day: 18,
                 },
                 tz_offset_hours: 3.0,
+                time_zone: None,
                 location: Location {
                     lat_deg: 21.4225,
                     lon_deg: 39.8262,
@@ -467,7 +483,8 @@ mod tests {
                     month: 4,
                     day: 1,
                 },
-                tz_offset_hours: 2.0,
+                tz_offset_hours: 0.0,
+                time_zone: Some("Europe/Oslo".into()),
                 location: Location {
                     lat_deg: 69.65,
                     lon_deg: 18.96,
@@ -505,6 +522,7 @@ mod tests {
                 day: 21,
             },
             tz_offset_hours: 0.0,
+            time_zone: None,
             location: Location {
                 lat_deg: 78.2,
                 lon_deg: 15.6,

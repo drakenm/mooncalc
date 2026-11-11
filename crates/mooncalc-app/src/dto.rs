@@ -10,8 +10,11 @@
 //! * JSON field names are `camelCase` (`#[serde(rename_all = "camelCase")]`).
 //! * Unit suffixes follow the workspace convention: `lat_deg` becomes
 //!   `latDeg`, `elevation_m` becomes `elevationM`. Longitude is east-positive.
-//! * Date-times on the wire are **UT**. Time-zone offsets only affect which
-//!   local date is meant, and display.
+//! * Date-times on the wire are **UT**. Time zones only affect which local
+//!   date is meant, and display. Services that take a zone accept an IANA
+//!   `timeZone` (with its DST and historical rules) or, without one, the
+//!   fixed `tzOffsetHours`; their results give each [`UtDateTime`] the
+//!   offset in force at that instant (`offsetHours`). See [`crate::zone`].
 //! * Enums are lowercase (or kebab-case) strings.
 //! * Every operation that takes input takes a single `params` object, so each
 //!   transport can pass one value per call.
@@ -80,7 +83,7 @@ impl From<mooncalc_core::events::CalendarDate> for CivilDate {
 }
 
 /// A date and time in **UT**. Mirrors `mooncalc_core::CalendarDateTime`.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UtDateTime {
     pub year: i32,
@@ -89,6 +92,11 @@ pub struct UtDateTime {
     pub hour: u32,
     pub minute: u32,
     pub second: f64,
+    /// Offset of local civil time from UT at this instant, hours, in the
+    /// request's time zone: set in results of services that take a zone
+    /// (local time = UT + offset), absent otherwise and ignored on input.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub offset_hours: Option<f64>,
 }
 
 impl UtDateTime {
@@ -124,6 +132,7 @@ impl From<Instant> for UtDateTime {
             hour: c.hour,
             minute: c.minute,
             second: c.second,
+            offset_hours: None,
         }
     }
 }
@@ -537,12 +546,17 @@ pub struct PngImage {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LocationReportParams {
-    /// The local calendar date (in the `tz_offset_hours` zone) whose evening
-    /// and morning are reported.
+    /// The local calendar date (in the request's zone) whose evening and
+    /// morning are reported.
     pub date: CivilDate,
-    /// Offset of local civil time from UT, hours. Civil noon of `date`
-    /// anchors the day.
+    /// Fixed offset of local civil time from UT, hours, used when
+    /// `time_zone` is absent. Civil noon of `date` anchors the day.
+    #[serde(default)]
     pub tz_offset_hours: f64,
+    /// IANA time zone (e.g. `Europe/London`), whose rules give the offset
+    /// on the date. Takes precedence over `tz_offset_hours`.
+    #[serde(default)]
+    pub time_zone: Option<String>,
     pub location: Location,
     #[serde(default)]
     pub ephemeris_id: Option<String>,
@@ -687,7 +701,13 @@ pub struct CrescentReport {
 pub struct LocationReport {
     pub location: Location,
     pub date: CivilDate,
+    /// The offset at local civil noon of `date`, hours (every time also
+    /// carries its own `offset_hours`).
     pub tz_offset_hours: f64,
+    /// The IANA zone used, if any.
+    pub time_zone: Option<String>,
+    /// The zone's abbreviation at civil noon (`BST`, `+03`, `UTC+05:30`).
+    pub zone_abbreviation: String,
     pub ephemeris: String,
     pub day: DayEventsDto,
     /// The Moon's age at local civil noon (from the nearest new Moon), hours.

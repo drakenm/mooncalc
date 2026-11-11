@@ -65,10 +65,12 @@ pub fn observer_note(
     date: CalendarDate,
     crescent: Crescent,
 ) -> Option<String> {
+    // The zone's offset at civil noon of the date.
+    let zone = settings.time.zone();
     mooncalc_app::dateline::observer_note(
         date,
         settings.location.lon_deg,
-        settings.time.tz_offset_hours,
+        zone.offset_hours(zone.civil_noon(date).jd_ut),
         app_crescent(crescent),
     )
 }
@@ -424,7 +426,7 @@ impl MapTab {
                 .on_hover_text(format!(
                     "Each place is evaluated on its own local evening/morning of this date \
                  (the selected time in {}).",
-                    crate::datetime::format_utc_offset(s.time.tz_offset_hours)
+                    crate::datetime::zone_text(s.time.zone(), s.time.jd_ut)
                 ));
             if ui.small_button(">").on_hover_text("Next day").clicked() {
                 s.time.jd_ut += 1.0;
@@ -521,7 +523,7 @@ impl MapTab {
     }
 
     fn side_panel(&mut self, ui: &mut egui::Ui, tc: &mut TabContext<'_>) {
-        let tz = tc.settings.time.tz_offset_hours;
+        let tz = tc.settings.time.zone();
         let Some(map) = self
             .shown
             .as_ref()
@@ -665,7 +667,7 @@ impl MapTab {
     }
 
     fn earliest_panel(&mut self, ui: &mut egui::Ui, tc: &mut TabContext<'_>) {
-        let tz = tc.settings.time.tz_offset_hours;
+        let tz = tc.settings.time.zone();
         egui::CollapsingHeader::new("Earliest sighting (evening crescent)")
             .default_open(true)
             .show(ui, |ui| {
@@ -761,7 +763,7 @@ impl MapTab {
                     let s = &mut *tc.settings;
                     // 18:00 local on that date: the map shows that date's
                     // evenings, and the report that evening.
-                    s.time.jd_ut = date.jd0() + 0.75 - s.time.tz_offset_hours / 24.0;
+                    s.time.jd_ut = s.time.zone().to_ut(date.jd0() + 0.75);
                     s.crescent = Crescent::Evening;
                     if let Some((lat, lon)) = place {
                         s.location.lat_deg = lat;

@@ -29,6 +29,7 @@ import {
 import { changed, type Store } from '../state';
 import { appDay, longDate, MONTH_NAMES, sameDay, setAppDay, shortDate, todayLocal } from './app-time';
 import { debounce, h, replaceChildren } from './dom';
+import { tzOf } from '../zone';
 
 const SETTINGS_KEY = 'mooncalc.calendar.v1';
 
@@ -130,10 +131,10 @@ export class CalendarView {
     ctx.store.subscribe((s, prev) => {
       const visLoc = this.settings.visibility.observers === 'location';
       if (
-        changed(s, prev, ['instant', 'tzOffsetHours', 'ephemerisId']) ||
+        changed(s, prev, ['instant', 'tzOffsetHours', 'timeZone', 'ephemerisId']) ||
         (visLoc && changed(s, prev, ['location', 'locationName']))
       ) {
-        if (changed(s, prev, ['instant', 'tzOffsetHours'])) this.view = null;
+        if (changed(s, prev, ['instant', 'tzOffsetHours', 'timeZone'])) this.view = null;
         this.stale = true;
         if (this.active) refresh();
       }
@@ -357,7 +358,7 @@ export class CalendarView {
           nav('« Prev', 'Previous month', step(-1)),
           nav('Today', 'Show the current month', () => {
             this.view = null;
-            void this.showDay(todayLocal(this.ctx.store.get().tzOffsetHours));
+            void this.showDay(todayLocal(tzOf(this.ctx.store.get())));
           }),
           nav('Selected', "Show the selected date's month", () => {
             this.view = null;
@@ -572,7 +573,7 @@ export class CalendarView {
       return;
     }
     const selected = appDay(this.ctx.store);
-    const today = todayLocal(this.ctx.store.get().tzOffsetHours);
+    const today = todayLocal(tzOf(this.ctx.store.get()));
     const wds = this.catalog?.weekdays ?? [];
     const cell = (d: CalendarDay | null) => {
       if (!d) return h('td', { class: 'empty' });

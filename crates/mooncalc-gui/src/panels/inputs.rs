@@ -23,8 +23,6 @@ pub struct InputsState {
     pub city_highlight: usize,
     /// A query was typed while the atlas was loading: search once it is ready.
     pub city_search_pending: bool,
-    /// Apply a city's daylight-saving offset rather than its standard one.
-    pub use_dst: bool,
     /// The user's saved locations (persisted by the app under
     /// [`location::USER_ATLAS_KEY`]).
     pub user_atlas: UserAtlas,
@@ -120,12 +118,6 @@ pub fn inputs_panel(ui: &mut egui::Ui, settings: &mut Settings, state: &mut Inpu
         backend_input(ui, settings);
     });
 }
-
-/// Tooltip of the daylight-saving checkbox.
-const DST_HINT: &str = "The atlas stores one standard and one daylight-saving UTC offset per \
-time zone (GeoNames, 2026 rules). Choosing a city sets the time-zone offset to the standard \
-offset, or to the DST offset when this is ticked. It does not follow DST transitions or \
-historical changes, so check the offset for dates far from 2026.";
 
 fn location_input(ui: &mut egui::Ui, settings: &mut Settings, state: &mut InputsState) {
     city_search(ui, settings, state);
@@ -247,13 +239,10 @@ fn city_search(ui: &mut egui::Ui, settings: &mut Settings, state: &mut InputsSta
         if let Some(i) = chosen.filter(|&i| i < state.city_results.len()) {
             let city = state.city_results.swap_remove(i);
             city.apply_to(&mut settings.location);
-            settings.time.tz_offset_hours = city.utc_offset_hours(state.use_dst);
+            city.apply_zone_to(&mut settings.time);
             state.clear_city_search();
         }
     }
-
-    ui.checkbox(&mut state.use_dst, "Use daylight-saving offset for cities")
-        .on_hover_text(DST_HINT);
 }
 
 /// What the user clicked in the saved-locations list.
@@ -280,8 +269,8 @@ fn user_locations(ui: &mut egui::Ui, settings: &mut Settings, state: &mut Inputs
                 if ui
                     .button("Save current")
                     .on_hover_text(
-                        "Save the current coordinates, elevation and time-zone offset \
-                         under this name (the location name if left empty)",
+                        "Save the current coordinates, elevation and time zone under \
+                         this name (the location name if left empty)",
                     )
                     .clicked()
                 {
@@ -290,11 +279,8 @@ fn user_locations(ui: &mut egui::Ui, settings: &mut Settings, state: &mut Inputs
                     } else {
                         state.new_user_name.clone()
                     };
-                    let loc = location::user_location_from(
-                        &name,
-                        &settings.location,
-                        settings.time.tz_offset_hours,
-                    );
+                    let loc =
+                        location::user_location_from(&name, &settings.location, &settings.time);
                     match state.user_atlas.add(loc) {
                         Ok(_) => {
                             state.new_user_name.clear();
@@ -331,7 +317,7 @@ fn user_locations(ui: &mut egui::Ui, settings: &mut Settings, state: &mut Inputs
                             "{}, {:.0} m, {}",
                             location::format_lat_lon(u.lat_deg, u.lon_deg),
                             u.elevation_m,
-                            crate::datetime::format_utc_offset(u.utc_offset_hours)
+                            u.zone()
                         ));
                         if ui.small_button("Rename").clicked() {
                             action = Some(UserAction::StartRename(i, u.name.clone()));
@@ -347,7 +333,7 @@ fn user_locations(ui: &mut egui::Ui, settings: &mut Settings, state: &mut Inputs
                     if let Some(u) = state.user_atlas.get(i) {
                         let place = CitySuggestion::from_user(u);
                         place.apply_to(&mut settings.location);
-                        settings.time.tz_offset_hours = place.std_offset_hours;
+                        place.apply_zone_to(&mut settings.time);
                     }
                 }
                 Some(UserAction::StartRename(i, name)) => state.renaming = Some((i, name)),
@@ -492,7 +478,7 @@ mod tests {
         assert!(state.user_error.is_some());
         assert_eq!(state.user_atlas_json(), "{broken");
 
-        let loc = location::user_location_from("Home", &Default::default(), 0.0);
+        let loc = location::user_location_from("Home", &Default::default(), &Default::default());
         state.user_atlas.add(loc).unwrap();
         let json = state.user_atlas_json();
         let mut again = InputsState::default();

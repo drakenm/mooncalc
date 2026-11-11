@@ -710,6 +710,16 @@ input:invalid {
   gap: 6px;
 }
 
+.tz-row select {
+  flex: 0 0 auto;
+  width: auto;
+}
+
+.tz-row input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 .de440 {
   display: flex;
   flex-direction: column;

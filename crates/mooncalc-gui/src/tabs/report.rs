@@ -18,6 +18,7 @@ use mooncalc_app::dto::{
     LocationReportParams, UtDateTime,
 };
 use mooncalc_app::report::{COVERAGE_MARGIN_DAYS, location_report, status_from_code};
+use mooncalc_atlas::Zone;
 use mooncalc_core::Ephemeris;
 use mooncalc_core::events::CalendarDate;
 use mooncalc_core::time::Instant;
@@ -36,7 +37,8 @@ use crate::settings::Settings;
 #[derive(Clone, Debug, PartialEq)]
 pub struct ReportKey {
     pub date: CalendarDate,
-    pub tz_offset_hours: f64,
+    /// The app time zone (IANA or fixed).
+    pub zone: Zone,
     pub name: String,
     pub lat_deg: f64,
     pub lon_deg: f64,
@@ -48,7 +50,7 @@ impl ReportKey {
     pub fn from_settings(s: &Settings, active: &ActiveEphemeris) -> Self {
         Self {
             date: CalendarDate::from_jd(s.time.jd_local()),
-            tz_offset_hours: s.time.tz_offset_hours,
+            zone: s.time.zone(),
             name: s.location.name.clone(),
             lat_deg: s.location.lat_deg,
             lon_deg: s.location.lon_deg,
@@ -59,14 +61,17 @@ impl ReportKey {
 
     /// Civil noon of the local date, as UT.
     pub fn civil_noon(&self) -> Instant {
-        Instant::from_jd_ut(self.date.jd0() + 0.5 - self.tz_offset_hours / 24.0)
+        self.zone.civil_noon(self.date)
     }
 
     /// The service request.
     pub fn params(&self) -> LocationReportParams {
         LocationReportParams {
             date: self.date.into(),
-            tz_offset_hours: self.tz_offset_hours,
+            // The IANA zone when there is one; the offset at civil noon is
+            // the fixed fallback (and the offset of a fixed zone).
+            tz_offset_hours: self.zone.offset_hours(self.civil_noon().jd_ut),
+            time_zone: self.zone.iana_name().map(str::to_owned),
             location: Location {
                 lat_deg: self.lat_deg,
                 lon_deg: self.lon_deg,
@@ -256,7 +261,7 @@ fn heading(c: Crescent) -> &'static str {
 
 /// The circumstance rows: (label, value).
 fn circumstance_rows(r: &CrescentReport, report: &LocationReport) -> Vec<(String, String)> {
-    let tz = report.tz_offset_hours;
+    let tz = report_zone(report);
     let d = Some((report.date.year, report.date.month, report.date.day));
     let t = |u: &UtDateTime| fmt_local_ut(jd(u), tz, d);
     let new_moon = r
@@ -347,6 +352,24 @@ fn circumstance_rows(r: &CrescentReport, report: &LocationReport) -> Vec<(String
     rows
 }
 
+/// The zone a report was computed in (its times also carry their offsets).
+fn report_zone(r: &LocationReport) -> Zone {
+    Zone::iana_or_fixed(r.time_zone.as_deref(), r.tz_offset_hours)
+}
+
+/// The report's zone at civil noon: `UTC+03:00`, `Europe/London, BST
+/// (UTC+01:00)`.
+fn zone_text(r: &LocationReport) -> String {
+    let offset = crate::datetime::format_utc_offset(r.tz_offset_hours);
+    match &r.time_zone {
+        None => offset,
+        Some(name) if r.zone_abbreviation.chars().all(|c| c.is_ascii_alphabetic()) => {
+            format!("{name}, {} ({offset})", r.zone_abbreviation)
+        }
+        Some(name) => format!("{name}, {offset}"),
+    }
+}
+
 fn date_text(r: &LocationReport) -> String {
     format!("{:04}-{:02}-{:02}", r.date.year, r.date.month, r.date.day)
 }
@@ -363,12 +386,7 @@ pub fn report_text(data: &ReportData) -> String {
         format_lat_lon(r.location.lat_deg, r.location.lon_deg),
         r.location.elevation_m
     );
-    let _ = writeln!(
-        out,
-        "Date: {} (local, {})",
-        date_text(r),
-        crate::datetime::format_utc_offset(r.tz_offset_hours)
-    );
+    let _ = writeln!(out, "Date: {} (local, {})", date_text(r), zone_text(r));
     let _ = writeln!(out, "Ephemeris: {}", r.ephemeris);
     if let Some(n) = &r.map_date_note {
         let _ = writeln!(out, "Note: {}", n.text);
@@ -472,7 +490,7 @@ impl ReportTab {
             return;
         };
         let r = &data.report;
-        let offset = crate::datetime::format_utc_offset(r.tz_offset_hours);
+        let offset = zone_text(r);
         ui.horizontal_wrapped(|ui| {
             ui.heading("Location report");
             ui.separator();
@@ -591,7 +609,7 @@ mod tests {
     fn key(lat: f64, lon: f64, date: CalendarDate, tz: f64) -> ReportKey {
         ReportKey {
             date,
-            tz_offset_hours: tz,
+            zone: Zone::fixed_hours(tz),
             name: "Test".into(),
             lat_deg: lat,
             lon_deg: lon,

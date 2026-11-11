@@ -3,8 +3,9 @@
 
 import { BackendError, type AppInfo, type Backend, type City, type CriterionInfo } from '../backend';
 import type { AppState, Store } from '../state';
+import { ensureZone, offsetAt, tzOf, utMs, zoneAbbrev } from '../zone';
 import { debounce, h, replaceChildren } from './dom';
-import { formatDate, formatOffset, formatTime, shiftHours, utToDate, zoneOffsetHours } from './format';
+import { formatDate, formatTime, shiftHours } from './format';
 
 export interface SidebarContext {
   backend: Backend;
@@ -35,8 +36,62 @@ export function createSidebar({ backend, store, info, criteria }: SidebarContext
     maxlength: 5,
     required: true,
   });
-  const tzInput = h('input', { type: 'number', min: -14, max: 14, step: 0.25, required: true });
+  const tzInput = h('input', { type: 'number', min: -14, max: 14, step: 0.25, required: true, 'aria-label': 'Fixed offset from UT, hours' });
   const localTime = h('p', { class: 'hint', 'aria-live': 'polite' });
+  // Time zone: an IANA zone (DST and historical rules, from the backend's
+  // IANA Time Zone Database) or a fixed offset.
+  const tzMode = h(
+    'select',
+    { 'aria-label': 'Time-zone kind' },
+    h('option', { value: 'zone' }, 'IANA zone'),
+    h('option', { value: 'fixed' }, 'Fixed offset'),
+  );
+  const zoneNames = h('datalist', { id: 'tz-names' });
+  const zoneInput = h('input', {
+    type: 'text',
+    list: 'tz-names',
+    placeholder: 'e.g. Europe/London',
+    spellcheck: 'false',
+    autocomplete: 'off',
+    'aria-label': 'IANA time zone',
+  });
+  const zoneError = h('p', { class: 'hint error', 'aria-live': 'polite' });
+  let namesLoaded = false;
+  zoneInput.addEventListener('focus', async () => {
+    if (namesLoaded) return;
+    namesLoaded = true;
+    try {
+      const names = await backend.timeZoneNames();
+      replaceChildren(zoneNames, ...names.map((n) => h('option', { value: n })));
+    } catch {
+      namesLoaded = false;
+    }
+  });
+  const quarter = (hours: number) => Math.round(hours * 4) / 4;
+  /** Load a zone's rules, then make it the app's zone (with `patch`). */
+  const selectZone = async (name: string, patch: Partial<AppState> = {}): Promise<boolean> => {
+    try {
+      const z = await ensureZone(name.trim(), (n) => backend.timeZoneOffsets({ timeZone: n }));
+      const offset = z.offsetAtMs(utMs(store.get().instant));
+      store.update({ ...patch, timeZone: z.name, tzOffsetHours: quarter(offset) });
+      zoneError.textContent = '';
+      return true;
+    } catch (err) {
+      zoneError.textContent = `Time zone "${name}": ${BackendError.from(err).message}`;
+      return false;
+    }
+  };
+  zoneInput.addEventListener('change', () => {
+    if (zoneInput.value.trim()) void selectZone(zoneInput.value);
+  });
+  tzMode.addEventListener('change', () => {
+    const s = store.get();
+    if (tzMode.value === 'fixed') {
+      store.update({ timeZone: null, tzOffsetHours: quarter(offsetAt(tzOf(s), s.instant)) });
+    } else {
+      void selectZone(zoneInput.value.trim() || 'Etc/UTC');
+    }
+  });
 
   const commitInstant = () => {
     if (!dateInput.checkValidity() || !timeInput.checkValidity()) return;
@@ -101,17 +156,15 @@ export function createSidebar({ backend, store, info, criteria }: SidebarContext
   const results = h('ul', { id: 'city-results', class: 'city-results', role: 'listbox', hidden: true });
   let searchSeq = 0;
 
-  const chooseCity = (c: City) => {
-    // The browser's tz rules know DST for the selected date; the atlas offset
-    // is the fallback.
-    const offset = (c.timeZone ? zoneOffsetHours(c.timeZone, utToDate(store.get().instant)) : null) ?? c.stdOffsetHours;
-    store.update({
-      location: { ...c.location },
-      locationName: `${c.name}, ${c.country}`,
-      tzOffsetHours: offset,
-    });
+  const chooseCity = async (c: City) => {
+    // The city's IANA zone gives the offset on every date (DST, history);
+    // without one, its standard offset.
+    const place = { location: { ...c.location }, locationName: `${c.name}, ${c.country}` };
     searchInput.value = '';
     results.hidden = true;
+    if (!(c.timeZone && (await selectZone(c.timeZone, place)))) {
+      store.update({ ...place, timeZone: null, tzOffsetHours: c.stdOffsetHours });
+    }
   };
 
   const runSearch = debounce(async (query: string) => {
@@ -132,7 +185,7 @@ export function createSidebar({ backend, store, info, criteria }: SidebarContext
                 {},
                 h(
                   'button',
-                  { type: 'button', role: 'option', onclick: () => chooseCity(c) },
+                  { type: 'button', role: 'option', onclick: () => void chooseCity(c) },
                   h('span', { class: 'city-name' }, c.name),
                   h(
                     'span',
@@ -226,8 +279,13 @@ export function createSidebar({ backend, store, info, criteria }: SidebarContext
     if (active !== dateInput) dateInput.value = formatDate(t);
     if (active !== timeInput) timeInput.value = formatTime(t);
     if (active !== tzInput) tzInput.value = String(s.tzOffsetHours);
-    const local = shiftHours(t, s.tzOffsetHours);
-    localTime.textContent = `Local: ${formatDate(local)} ${formatTime(local)} (${formatOffset(s.tzOffsetHours)})`;
+    tzMode.value = s.timeZone ? 'zone' : 'fixed';
+    zoneInput.hidden = !s.timeZone;
+    tzInput.hidden = !!s.timeZone;
+    if (active !== zoneInput && s.timeZone) zoneInput.value = s.timeZone;
+    const tz = tzOf(s);
+    const local = shiftHours(t, offsetAt(tz, t));
+    localTime.textContent = `Local: ${formatDate(local)} ${formatTime(local)} (${zoneAbbrev(tz, utMs(t))})`;
 
     if (active !== latInput) latInput.value = String(+s.location.latDeg.toFixed(4));
     if (active !== lonInput) lonInput.value = String(+s.location.lonDeg.toFixed(4));
@@ -259,7 +317,9 @@ export function createSidebar({ backend, store, info, criteria }: SidebarContext
       { class: 'panel' },
       h('h2', {}, 'Date & time (UT)', nowButton),
       h('div', { class: 'row' }, field('Date', dateInput), field('Time (24 h)', timeInput)),
-      field('Time-zone offset (h)', tzInput, localTime),
+      field('Time zone', h('div', { class: 'inline-row tz-row' }, tzMode, zoneInput, tzInput), localTime),
+      zoneNames,
+      zoneError,
     ),
     h(
       'section',

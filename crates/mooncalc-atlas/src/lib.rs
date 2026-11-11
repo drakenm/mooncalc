@@ -8,6 +8,10 @@
 //!   `City, Country` input and ranks by match quality, then population.
 //! * [`Atlas::nearest`] finds the closest city to a point (bucket grid; cheap
 //!   enough for mouse-hover use).
+//! * [`tz`]: IANA time zones with their full rules (DST, history) and fixed
+//!   offsets ([`Zone`]): the UTC offset at any instant, local ↔ UT with DST
+//!   gaps and folds, local day bounds. Every [`City::timezone`] is a valid
+//!   [`Zone::iana`] name.
 //! * [`UserAtlas`] holds up to [`MAX_USER_LOCATIONS`] user-defined locations,
 //!   stored as JSON; [`Atlas::search_with_user`] merges them into searches.
 //!
@@ -16,15 +20,18 @@
 //! `wasm32-unknown-unknown`.
 //!
 //! Data: GeoNames (<https://www.geonames.org/>), licensed CC BY 4.0. Display
-//! [`ATTRIBUTION`] wherever atlas data is shown.
+//! [`ATTRIBUTION`] wherever atlas data is shown. Time-zone rules: the IANA
+//! Time Zone Database, public domain ([`tz::TZ_ATTRIBUTION`]).
 
 mod atlas;
 mod fold;
 mod fold_table;
+pub mod tz;
 mod user;
 
 pub use atlas::{Atlas, City, Country, MatchQuality, ParseError, distance_km};
 pub use fold::fold;
+pub use tz::{LocalTime, Zone};
 pub use user::{MAX_USER_LOCATIONS, Place, UserAtlas, UserAtlasError, UserLocation};
 
 /// Credit line required by the GeoNames licence (CC BY 4.0).

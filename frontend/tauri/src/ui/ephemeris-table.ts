@@ -7,6 +7,7 @@ import { copyText, localDateTime, timeLink, zoneLabel } from './app-time';
 import { debounce, h, replaceChildren } from './dom';
 import { runner, type EphemerisContext, type SubView } from './ephemeris-view';
 import { shiftHours } from './format';
+import { localToUtMs, offsetAt, type Tz, tzOf, utMs } from '../zone';
 
 const SETTINGS_KEY = 'mooncalc.ephemeris.table.v1';
 /** Rows drawn on screen; copying includes every row. */
@@ -132,16 +133,19 @@ function save(s: TableSettings): void {
 }
 
 /** "YYYY-MM-DDTHH:MM" of a UT instant in the zone, for a datetime-local input. */
-function toInputValue(t: UtDateTime, tz: number): string {
-  const l = shiftHours({ ...t, second: 0 }, tz);
+function toInputValue(t: UtDateTime, tz: Tz): string {
+  const l = shiftHours({ ...t, second: 0 }, offsetAt(tz, t));
   return `${pad(l.year, 4)}-${pad(l.month)}-${pad(l.day)}T${pad(l.hour)}:${pad(l.minute)}`;
 }
 
-function fromInputValue(v: string, tz: number): UtDateTime | null {
+/** The UT instant of a local datetime-local value (a time skipped by a DST
+ * change moves forward; a repeated one takes its first occurrence). */
+function fromInputValue(v: string, tz: Tz): UtDateTime | null {
   const m = /^(-?\d{4,})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(v);
   if (!m) return null;
   const local = { year: Number(m[1]), month: Number(m[2]), day: Number(m[3]), hour: Number(m[4]), minute: Number(m[5]), second: 0 };
-  return shiftHours(local, -tz);
+  const ms = localToUtMs(tz, utMs(local));
+  return shiftHours(local, (ms - utMs(local)) / 3_600_000);
 }
 
 export function createTableView({ backend, store }: EphemerisContext): SubView {
@@ -159,8 +163,8 @@ export function createTableView({ backend, store }: EphemerisContext): SubView {
   const startLabel = h('span', {});
   const fromApp = () => {
     const st = store.get();
-    start.value = toInputValue(st.instant, st.tzOffsetHours);
-    startLabel.textContent = `Start (${zoneLabel(st.tzOffsetHours)}) `;
+    start.value = toInputValue(st.instant, tzOf(st));
+    startLabel.textContent = `Start (${zoneLabel(tzOf(st))}) `;
   };
   fromApp();
   const stepValue = h('input', { type: 'number', min: 0.1, step: 'any', value: String(s.stepValue), 'aria-label': 'Step', class: 'num-input' });
@@ -193,7 +197,7 @@ export function createTableView({ backend, store }: EphemerisContext): SubView {
 
   const params = () => {
     const st = store.get();
-    const t = fromInputValue(start.value, st.tzOffsetHours);
+    const t = fromInputValue(start.value, tzOf(st));
     const step = Math.max(0.1, Number(stepValue.value) || 1) * UNIT_MINUTES[stepUnit.value as Unit];
     const n = Math.min(MAX_ROWS, Math.max(1, Math.round(Number(count.value) || 1)));
     return t ? { start: t, stepMinutes: step, count: n, location: topo.checked ? st.location : null, ephemerisId: st.ephemerisId } : null;
@@ -240,14 +244,14 @@ export function createTableView({ backend, store }: EphemerisContext): SubView {
 
   store.subscribe((st, prev) => {
     if (changed(st, prev, ['ephemerisId']) || (topo.checked && changed(st, prev, ['location']))) recompute();
-    if (!pinnedStart && changed(st, prev, ['instant', 'tzOffsetHours'])) {
+    if (!pinnedStart && changed(st, prev, ['instant', 'tzOffsetHours', 'timeZone'])) {
       fromApp();
       recompute();
-    } else if (changed(st, prev, ['tzOffsetHours'])) {
+    } else if (changed(st, prev, ['tzOffsetHours', 'timeZone'])) {
       // Keep the same instant; show it in the new zone.
-      const t = fromInputValue(start.value, prev.tzOffsetHours);
-      if (t) start.value = toInputValue(t, st.tzOffsetHours);
-      startLabel.textContent = `Start (${zoneLabel(st.tzOffsetHours)}) `;
+      const t = fromInputValue(start.value, tzOf(prev));
+      if (t) start.value = toInputValue(t, tzOf(st));
+      startLabel.textContent = `Start (${zoneLabel(tzOf(st))}) `;
       if (last) render(last);
     }
   });
@@ -256,7 +260,7 @@ export function createTableView({ backend, store }: EphemerisContext): SubView {
 
   const toText = (sep: string) => {
     if (!last) return '';
-    const tz = store.get().tzOffsetHours;
+    const tz = tzOf(store.get());
     const cols = selected();
     const quote = (v: string) => (sep === ',' && /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
     const lines = [[`Time (${zoneLabel(tz)})`, 'Time (UT)', ...cols.map((c) => c.header)].map(quote).join(sep)];
@@ -280,7 +284,7 @@ export function createTableView({ backend, store }: EphemerisContext): SubView {
   };
 
   const render = (t: EphemerisTable) => {
-    const tz = store.get().tzOffsetHours;
+    const tz = tzOf(store.get());
     const cols = selected();
     const st = (style.value as Style) ?? 'sexagesimal';
     const shown = t.rows.slice(0, MAX_SHOWN);

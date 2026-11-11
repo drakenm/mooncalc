@@ -490,14 +490,14 @@ pub fn selected_day(time: &TimeSettings) -> i64 {
 
 /// Today's civil day in the zone of `time`.
 pub fn today(time: &TimeSettings) -> i64 {
-    civil_day(datetime::now_jd() + time.tz_offset_hours / 24.0)
+    civil_day(time.zone().to_local(datetime::now_jd()))
 }
 
 /// Move `time` to local civil day `jdn`, keeping the local time of day.
 pub fn set_day(time: &mut TimeSettings, jdn: i64) {
     let local = time.jd_local();
     let fraction = local + 0.5 - (local + 0.5).floor();
-    time.jd_ut = jdn as f64 - 0.5 + fraction - time.tz_offset_hours / 24.0;
+    time.jd_ut = time.zone().to_ut(jdn as f64 - 0.5 + fraction);
 }
 
 /// `11 November 2026`.
@@ -1879,6 +1879,7 @@ mod tests {
             tz_offset_hours: 3.0,
             edit_local: true,
             start_at_now: false,
+            ..TimeSettings::default()
         };
         assert_eq!(selected_day(&t), jdn(2024, 3, 11));
         set_day(&mut t, jdn(2024, 4, 9));

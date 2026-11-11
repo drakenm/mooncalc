@@ -10,6 +10,7 @@
 import { BackendError, type Backend, type MapParams, type MapResult } from '../backend';
 import { observerNote } from '../dateline';
 import { changed, localDate, type AppState, type Store } from '../state';
+import { noonOffset, tzOf } from '../zone';
 import { BasemapLayer } from './basemap-layer';
 import { debounce, h, replaceChildren } from './dom';
 import { downloadBase64, formatDate, formatLat, formatLon, formatUtDateTime, formatValue, valueSymbol } from './format';
@@ -165,7 +166,7 @@ export class MapView {
         if (this.active) recompute();
       }
       if (changed(s, prev, ['location'])) this.requestDraw();
-      if (changed(s, prev, ['location', 'tzOffsetHours'])) this.updateObserverNote();
+      if (changed(s, prev, ['location', 'tzOffsetHours', 'timeZone'])) this.updateObserverNote();
     });
     this.resolutionSelect.value = String(this.store.get().mapResolutionDeg);
     this.updateReadout();
@@ -319,7 +320,7 @@ export class MapView {
   private updateObserverNote(): void {
     const r = this.result;
     const s = this.store.get();
-    const note = r ? observerNote(r.date, s.location.lonDeg, s.tzOffsetHours, r.crescent) : null;
+    const note = r ? observerNote(r.date, s.location.lonDeg, noonOffset(tzOf(s), r.date), r.crescent) : null;
     this.observerNote.textContent = note ?? '';
     this.observerNote.hidden = note === null;
   }

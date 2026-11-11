@@ -5,6 +5,7 @@
 
 use mooncalc_app::dto::ApiError;
 use mooncalc_app::tables::{YEAR_COVERAGE_MARGIN_DAYS, YearParams};
+use mooncalc_atlas::Zone;
 use mooncalc_core::Instant;
 use mooncalc_core::events::CalendarDate;
 use mooncalc_core::seasons::equation_of_time;
@@ -40,13 +41,14 @@ pub struct YearSeasons {
 pub fn year_seasons(
     eph: &dyn mooncalc_core::Ephemeris,
     year: i32,
-    tz: f64,
+    tz: Zone,
 ) -> Result<YearSeasons, ApiError> {
     let y = mooncalc_app::tables::seasons(
         eph,
         &YearParams {
             year,
-            tz_offset_hours: tz,
+            tz_offset_hours: tz.fixed_offset_hours().unwrap_or_default(),
+            time_zone: tz.iana_name().map(str::to_owned),
             ephemeris_id: None,
         },
     )?;
@@ -63,10 +65,7 @@ pub fn year_seasons(
         daily_eot: y
             .equation_of_time
             .iter()
-            .map(|p| {
-                let noon = CalendarDate::from(p.date).jd0() + 0.5 - tz / 24.0;
-                (Instant::from_jd_ut(noon), p.minutes)
-            })
+            .map(|p| (tz.civil_noon(CalendarDate::from(p.date)), p.minutes))
             .collect(),
     })
 }
@@ -74,7 +73,7 @@ pub fn year_seasons(
 #[derive(Clone, Debug, PartialEq)]
 struct Request {
     year: i32,
-    tz: f64,
+    tz: Zone,
     eph: EphKey,
 }
 
@@ -95,7 +94,7 @@ impl SeasonsView {
         if visible && self.coverage(tc).is_none() {
             let req = Request {
                 year: self.year.unwrap_or(app_year(tc.settings)),
-                tz: tc.settings.time.tz_offset_hours,
+                tz: tc.settings.time.zone(),
                 eph: EphKey::of(tc.settings),
             };
             let eph = ephemeris(tc.settings);
@@ -109,7 +108,7 @@ impl SeasonsView {
     }
 
     pub fn ui(&mut self, ui: &mut egui::Ui, tc: &mut TabContext<'_>) {
-        let tz = tc.settings.time.tz_offset_hours;
+        let tz = tc.settings.time.zone();
         let eph = ephemeris(tc.settings);
         ui.horizontal_wrapped(|ui| {
             year_picker(ui, &mut self.year, app_year(tc.settings));
@@ -236,7 +235,7 @@ mod tests {
     #[test]
     fn equation_of_time_extremes_2024() {
         let eph = MeeusEphemeris::new();
-        let ys = year_seasons(&eph, 2024, 0.0).unwrap();
+        let ys = year_seasons(&eph, 2024, Zone::UTC).unwrap();
         assert_eq!(ys.daily_eot.len(), 366);
         let c = ys.seasons[0].to_calendar();
         assert_eq!((c.month, c.day), (3, 20));
