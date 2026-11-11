@@ -11,6 +11,8 @@ use mooncalc_maps::render::{
 };
 use serde::{Deserialize, Serialize};
 
+pub use mooncalc_app::map::ascii_label;
+
 use super::compute::{ComputedMap, Resolution};
 use crate::settings::Crescent;
 
@@ -142,30 +144,6 @@ pub const CITIES: [(&str, f64, f64); 16] = [
     ("New York", 40.7128, -74.006),
     ("Sao Paulo", -23.5505, -46.6333),
 ];
-
-/// The 5x7 map font covers printable ASCII and `°` only.
-pub fn ascii_label(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for c in s.chars() {
-        match c {
-            ' '..='~' | '°' => out.push(c),
-            '≥' => out.push_str(">="),
-            '≤' => out.push_str("<="),
-            '′' | '’' | '‘' => out.push('\''),
-            '″' | '“' | '”' => out.push('"'),
-            '–' | '—' | '−' => out.push('-'),
-            '×' => out.push('x'),
-            '·' => out.push('-'),
-            'á' | 'à' | 'â' | 'ä' => out.push('a'),
-            'é' | 'è' | 'ê' => out.push('e'),
-            'ö' | 'ó' => out.push('o'),
-            'ü' | 'ú' => out.push('u'),
-            'ç' => out.push('c'),
-            _ => out.push('?'),
-        }
-    }
-    out
-}
 
 /// "2024-03-10".
 pub fn date_text(d: mooncalc_core::events::CalendarDate) -> String {
@@ -388,15 +366,6 @@ pub fn export_svg(map: &ComputedMap, settings: &MapSettings, o: &ExportOptions) 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn ascii_labels_have_no_unsupported_glyphs() {
-        assert_eq!(
-            ascii_label("Easily visible (ARCL ≥ 12°) — W′"),
-            "Easily visible (ARCL >= 12°) - W'"
-        );
-        assert_eq!(ascii_label("日"), "?");
-    }
 
     #[test]
     fn projections_follow_the_settings() {

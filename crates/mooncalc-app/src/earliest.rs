@@ -8,6 +8,7 @@
 
 use mooncalc_core::Ephemeris;
 use mooncalc_core::events::CalendarDate;
+use mooncalc_core::events::phases::SYNODIC_MONTH_DAYS;
 use mooncalc_core::time::Instant;
 use mooncalc_maps::engine::{EarliestScan, conjunction_near, scan_dates};
 use mooncalc_visibility::Criterion;
@@ -37,9 +38,35 @@ pub struct EarliestJob {
     scan: EarliestScan,
 }
 
+/// The first geocentric new Moon at or after `jd_ut`.
+pub fn next_new_moon(eph: &dyn Ephemeris, jd_ut: f64) -> Instant {
+    let c = conjunction_near(eph, Instant::from_jd_ut(jd_ut + 0.5 * SYNODIC_MONTH_DAYS));
+    if c.jd_ut < jd_ut {
+        conjunction_near(eph, c.add_days(SYNODIC_MONTH_DAYS))
+    } else {
+        c
+    }
+}
+
 impl EarliestJob {
     /// Validate and find the conjunction nearest noon UT of `params.date`.
     pub fn prepare(eph: &dyn Ephemeris, params: &EarliestParams) -> Result<Self, ApiError> {
+        validate::date(params.date)?;
+        let d = CalendarDate::from(params.date);
+        let noon = Instant::from_jd_ut(d.jd0() + 0.5);
+        crate::ephemeris::check_covers(eph, noon.jd_tt() - 32.0, noon.jd_tt() + 45.0)?;
+        let conjunction = conjunction_near(eph, noon);
+        Self::with_conjunction(params, conjunction)
+    }
+
+    /// As [`Self::prepare`], but for a given conjunction, for frontends
+    /// that pick the lunation another way (the egui map scans the first new
+    /// Moon after a date, [`next_new_moon`]). `params.date` is only
+    /// validated. Each evening's [`MapJob::prepare`] checks its coverage.
+    pub fn with_conjunction(
+        params: &EarliestParams,
+        conjunction: Instant,
+    ) -> Result<Self, ApiError> {
         validate::date(params.date)?;
         let criterion = criteria::get(&params.criterion_id)?;
         let resolution_deg = params.resolution_deg.unwrap_or(DEFAULT_RESOLUTION_DEG);
@@ -54,10 +81,11 @@ impl EarliestJob {
                 "evenings must be between 1 and 10",
             ));
         }
-        let d = CalendarDate::from(params.date);
-        let noon = Instant::from_jd_ut(d.jd0() + 0.5);
-        crate::ephemeris::check_covers(eph, noon.jd_tt() - 32.0, noon.jd_tt() + 45.0)?;
-        let conjunction = conjunction_near(eph, noon);
+        if !conjunction.jd_ut.is_finite() {
+            return Err(ApiError::invalid_params(
+                "no new Moon found: the date is outside the ephemeris coverage",
+            ));
+        }
         Ok(Self {
             params: params.clone(),
             criterion,
@@ -196,6 +224,37 @@ mod tests {
         assert!(a.nearest_city.is_some());
         assert_eq!(r.dates_scanned[0].day, 9);
         assert!(r.dates_scanned.len() <= 4);
+    }
+
+    #[test]
+    fn next_new_moon_is_at_or_after() {
+        let eph = meeus(false);
+        let t = CalendarDate::new(2024, 3, 11).jd0();
+        let c = next_new_moon(&*eph, t);
+        assert!(c.jd_ut >= t && c.jd_ut < t + SYNODIC_MONTH_DAYS);
+        assert_eq!(c.to_calendar().month, 4); // 2024-04-08
+        // From 2024-03-07 (3 days before 2024-03-10): the March new Moon.
+        let c = next_new_moon(&*eph, CalendarDate::new(2024, 3, 7).jd0());
+        assert_eq!((c.to_calendar().month, c.to_calendar().day), (3, 10));
+        // A given conjunction scans from the evening before it.
+        let job = EarliestJob::with_conjunction(
+            &EarliestParams {
+                date: CivilDate {
+                    year: 2024,
+                    month: 3,
+                    day: 7,
+                },
+                criterion_id: "yallop".into(),
+                resolution_deg: None,
+                evenings: Some(4),
+                ephemeris_id: None,
+            },
+            c,
+        )
+        .unwrap();
+        assert_eq!(job.conjunction(), c);
+        assert_eq!(job.dates()[0], CalendarDate::new(2024, 3, 9));
+        assert_eq!(job.dates().len(), 4);
     }
 
     #[test]
