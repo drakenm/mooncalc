@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Build the bright-star table embedded in the egui Sky tab.
+"""Build the bright-star table shared by the egui and Tauri Sky tabs.
 
 Reads the Yale Bright Star Catalogue, 5th revised edition (Hoffleit &
-Warren 1991, BSC5), and writes `crates/mooncalc-gui/src/sky/stars_data.rs`:
+Warren 1991, BSC5), and writes `crates/mooncalc-app/src/sky/stars_data.rs`:
 every star brighter than the magnitude limit with J2000 RA/Dec, V magnitude,
 B-V colour index and a Bayer/Flamsteed label.
 
@@ -25,7 +25,7 @@ import urllib.request
 URL = "http://tdc-www.harvard.edu/catalogs/bsc5.dat.gz"
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 DOWNLOAD = ROOT / "tools" / "stars" / "download"
-OUTPUT = ROOT / "crates" / "mooncalc-gui" / "src" / "sky" / "stars_data.rs"
+OUTPUT = ROOT / "crates" / "mooncalc-app" / "src" / "sky" / "stars_data.rs"
 MAG_LIMIT = 3.5
 # BSC5 lists the recurrent nova T CrB (HR 5958) at its 1866 outburst peak,
 # V = 2.0; it is normally near V = 10, so it is left out.

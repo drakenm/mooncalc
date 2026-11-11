@@ -1,126 +1,24 @@
-//! What the Sky and Trajectory tabs show, computed from an ephemeris:
-//! topocentric Sun and Moon states ([`Snapshot`]), the evening or morning
-//! of a crescent sighting ([`Night`]) and one local day ([`Day`]).
-//!
-//! Both scenes tabulate the ephemeris once ([`ApparentTable`], cubic
-//! interpolation at 30-minute nodes, far below 0.001″ of error) and then
-//! evaluate any instant cheaply, so the views can animate per frame.
+//! What the Sky and Trajectory tabs show. The computation is shared with
+//! the Tauri frontend in [`mooncalc_app::sky::scene`]: topocentric Sun and
+//! Moon states ([`Snapshot`]), the evening or morning of a crescent
+//! sighting ([`Night`], over [`NightScene`]) and one local day ([`Day`],
+//! over [`DayScene`]). This module adds the cache keys built from the
+//! GUI settings and [`ephemeris`], the single hook that picks the
+//! ephemeris.
 
-use mooncalc_core::angle::norm_pi;
-use mooncalc_core::events::phases::{Phase, phases_between};
-use mooncalc_core::events::{
-    ApparentTable, Body, CalendarDate, DayEvents, Horizon, Observer, PositionSource, Twilight,
-    day_events, twilight,
+use std::ops::Deref;
+
+use mooncalc_core::events::CalendarDate;
+use mooncalc_core::{Ephemeris, GeoLocation};
+use mooncalc_visibility::circumstances::Sighting;
+
+pub use mooncalc_app::sky::scene::{
+    ATMOSPHERE, BodyState, DAY_SAMPLE_STEP, DayScene, NIGHT_SAMPLE_STEP, NightScene, Snapshot,
+    civil_noon, local_date, snapshot,
 };
-use mooncalc_core::illumination::Illumination;
-use mooncalc_core::matrix::to_spherical;
-use mooncalc_core::nutation::NutationObliquity;
-use mooncalc_core::refraction::{Atmosphere, apparent_altitude};
-use mooncalc_core::transform::equatorial_to_ecliptic;
-use mooncalc_core::{Ephemeris, Equatorial, GeoLocation, Instant};
-use mooncalc_visibility::CrescentGeometry;
-use mooncalc_visibility::circumstances::{self, Outcome, Request, Sighting, geometry_at};
-use mooncalc_visibility::criteria::{Criterion, CriterionResult, EvaluationTime};
 
-use super::geometry::{parallactic_angle, zenith_limb_angle};
-use super::stars::{StarOfDate, stars_of_date};
 use crate::backend::BackendChoice;
 use crate::settings::{Crescent, Settings};
-
-/// Atmosphere for apparent altitudes in the views.
-pub const ATMOSPHERE: Atmosphere = Atmosphere::STANDARD;
-
-/// One body seen by the observer at one instant.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct BodyState {
-    /// Apparent (refracted) altitude of the centre, radians.
-    pub alt: f64,
-    /// Airless topocentric altitude, radians.
-    pub alt_airless: f64,
-    /// Azimuth from north through east, radians.
-    pub az: f64,
-    /// Topocentric apparent equatorial coordinates (true equator and
-    /// equinox of date); `distance_km` is observer-to-body.
-    pub topo: Equatorial,
-    /// Topocentric hour angle, radians in `(−π, π]`, west positive.
-    pub hour_angle: f64,
-}
-
-/// The Sun and Moon for one observer at one instant.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Snapshot {
-    pub jd_ut: f64,
-    /// Local apparent sidereal time, radians.
-    pub lst: f64,
-    pub sun: BodyState,
-    pub moon: BodyState,
-    /// Geocentric distance of the Moon, km.
-    pub moon_geo_distance_km: f64,
-    /// Topocentric illumination (elongation, phase angle, fraction,
-    /// bright-limb position angle χ from north).
-    pub illumination: Illumination,
-    /// Parallactic angle of the Moon, radians.
-    pub parallactic: f64,
-    /// Position angle of the bright limb from the zenith, `χ − q`, radians.
-    pub limb_zenith: f64,
-    /// Geocentric elongation in ecliptic longitude `λ☾ − λ☉`, degrees in
-    /// `[0, 360)`, which names the phase.
-    pub elongation_lon_deg: f64,
-}
-
-fn body_state<S: PositionSource + ?Sized>(
-    src: &S,
-    frame: &mooncalc_core::events::LocalFrame,
-    body: Body,
-    jd_ut: f64,
-    atm: &Atmosphere,
-) -> BodyState {
-    let geo = src.position(body, jd_ut);
-    let t = frame.topocentric(&geo);
-    let alt_airless = frame.altitude(&t);
-    let (ra, dec, distance_km) = to_spherical(&t);
-    BodyState {
-        alt: apparent_altitude(alt_airless, atm),
-        alt_airless,
-        az: frame.azimuth(&t),
-        topo: Equatorial {
-            ra,
-            dec,
-            distance_km,
-        },
-        hour_angle: norm_pi(frame.lst - ra),
-    }
-}
-
-/// The Sun and Moon seen by `obs` at UT Julian Day `jd_ut`.
-pub fn snapshot<S: PositionSource + ?Sized>(
-    src: &S,
-    obs: &Observer,
-    jd_ut: f64,
-    atm: &Atmosphere,
-) -> Snapshot {
-    let frame = obs.frame_at(src, jd_ut);
-    let sun = body_state(src, &frame, Body::Sun, jd_ut, atm);
-    let moon = body_state(src, &frame, Body::Moon, jd_ut, atm);
-    let illumination = Illumination::compute(&sun.topo, &moon.topo);
-    let parallactic = parallactic_angle(moon.hour_angle, moon.topo.dec, obs.lat);
-    let eps = NutationObliquity::at(Instant::from_jd_ut(jd_ut).jd_tt()).eps;
-    let sun_geo = src.equatorial(Body::Sun, jd_ut);
-    let moon_geo = src.equatorial(Body::Moon, jd_ut);
-    let dlon =
-        equatorial_to_ecliptic(&moon_geo, eps).lon - equatorial_to_ecliptic(&sun_geo, eps).lon;
-    Snapshot {
-        jd_ut,
-        lst: frame.lst,
-        sun,
-        moon,
-        moon_geo_distance_km: moon_geo.distance_km,
-        illumination,
-        parallactic,
-        limb_zenith: zenith_limb_angle(illumination.bright_limb_angle, parallactic),
-        elongation_lon_deg: dlon.to_degrees().rem_euclid(360.0),
-    }
-}
 
 /// The ephemeris used by the Sky and Trajectory tabs.
 ///
@@ -129,16 +27,6 @@ pub fn snapshot<S: PositionSource + ?Sized>(
 /// `settings.backend.effective()`, so a backend change recomputes them.
 pub fn ephemeris(settings: &Settings) -> std::sync::Arc<dyn Ephemeris> {
     crate::backend::resolve(settings.backend, &settings.de440_path).eph
-}
-
-/// UT of civil noon on local date `date` in a zone `tz_hours` ahead of UT.
-pub fn civil_noon(date: CalendarDate, tz_hours: f64) -> f64 {
-    date.jd0() + 0.5 - tz_hours / 24.0
-}
-
-/// The local calendar date of a UT Julian Day.
-pub fn local_date(jd_ut: f64, tz_hours: f64) -> CalendarDate {
-    CalendarDate::from_jd(jd_ut + tz_hours / 24.0)
 }
 
 /// Inputs that determine a [`Night`].
@@ -165,170 +53,35 @@ impl NightKey {
     }
 }
 
-/// Spacing of the precomputed path samples, days (2 minutes).
-pub const NIGHT_SAMPLE_STEP: f64 = 2.0 / 1440.0;
-/// Path samples extend this far beyond the slider window, days.
-const NIGHT_PATH_MARGIN: f64 = 1.0 / 24.0;
-
-/// The evening (or morning) of a crescent sighting on one local date.
+/// The evening (or morning) of a crescent sighting on one local date: a
+/// [`NightScene`] with the key it was computed for.
 pub struct Night {
     pub key: NightKey,
-    pub table: ApparentTable,
-    pub observer: Observer,
-    pub outcome: Outcome,
-    /// The selected criterion and its verdict at its evaluation time.
-    pub criterion: Option<Box<dyn Criterion>>,
-    pub verdict: Option<CriterionResult>,
-    /// Sunset (evening) or sunrise (morning), UT JD.
-    pub sun_event: Option<f64>,
-    /// Moonset (evening) or moonrise (morning), UT JD.
-    pub moon_event: Option<f64>,
-    /// The criterion's evaluation instant ("best time"), UT JD.
-    pub evaluation: Option<f64>,
-    /// The time-slider span, UT JD: sunset → moonset (evening) or
-    /// moonrise → sunrise (morning), with a few minutes either side.
-    pub start: f64,
-    pub end: f64,
-    /// Samples every [`NIGHT_SAMPLE_STEP`] over the slider span plus an
-    /// hour either side, for the paths.
-    pub samples: Vec<Snapshot>,
-    /// Bright stars of date.
-    pub stars: Vec<StarOfDate>,
-    pub ephemeris_name: String,
+    scene: NightScene,
 }
 
 impl Night {
     pub fn compute(key: NightKey, eph: &dyn Ephemeris) -> Self {
-        let noon = civil_noon(key.date, key.tz_hours);
-        let evening = key.crescent == Crescent::Evening;
-        let criterion = mooncalc_visibility::criteria::by_id(&key.criterion_id);
-        let evaluation_rule = criterion
-            .as_ref()
-            .map_or(EvaluationTime::YallopBestTime, |c| c.evaluation_time());
-        let table = ApparentTable::with_default_step(
+        let sighting = match key.crescent {
+            Crescent::Evening => Sighting::Evening,
+            Crescent::Morning => Sighting::Morning,
+        };
+        let scene = NightScene::compute(
             eph,
-            Instant::from_jd_ut(noon - 2.0),
-            Instant::from_jd_ut(noon + 2.0),
+            key.date,
+            key.tz_hours,
+            key.location,
+            sighting,
+            &key.criterion_id,
         );
-        let new_moons = circumstances::new_moons_around(eph, Instant::from_jd_ut(noon));
-        let req = Request {
-            location: key.location,
-            noon: Instant::from_jd_ut(noon),
-            sighting: if evening {
-                Sighting::Evening
-            } else {
-                Sighting::Morning
-            },
-            evaluation: evaluation_rule,
-        };
-        let outcome = circumstances::compute_with(&table, &new_moons, &req, &Default::default());
-        let verdict = criterion
-            .as_ref()
-            .and_then(|c| outcome.evaluate(c.as_ref()));
-        let observer = Observer::new(&key.location);
-
-        let (sun_event, moon_event, evaluation) = match &outcome {
-            Outcome::MoonAlwaysUp {
-                sun_event,
-                circumstances,
-            } => (
-                Some(sun_event.jd_ut),
-                None,
-                circumstances.map(|c| c.evaluation.jd_ut),
-            ),
-            Outcome::MoonAlwaysDown { sun_event }
-            | Outcome::SunAltitudeNotReached { sun_event } => (Some(sun_event.jd_ut), None, None),
-            Outcome::NoSunEvent(_) => (None, None, None),
-            other => {
-                let c = other
-                    .circumstances()
-                    .expect("circumstances for this outcome");
-                (
-                    Some(c.sun_event.jd_ut),
-                    c.moon_event.map(|t| t.jd_ut),
-                    Some(c.evaluation.jd_ut),
-                )
-            }
-        };
-
-        const PAD: f64 = 10.0 / 1440.0;
-        const DEFAULT_SPAN: f64 = 2.0 / 24.0;
-        const MAX_SPAN: f64 = 8.0 / 24.0;
-        let (start, end) = match (sun_event, moon_event) {
-            (Some(s), Some(m)) if evening && m > s => (s - PAD, s + (m - s).min(MAX_SPAN) + PAD),
-            (Some(s), Some(m)) if !evening && m < s => (s - (s - m).min(MAX_SPAN) - PAD, s + PAD),
-            (Some(s), _) if evening => (s - PAD, s + DEFAULT_SPAN),
-            (Some(s), _) => (s - DEFAULT_SPAN, s + PAD),
-            // Polar day or night: the evening or morning hours by the clock.
-            (None, _) if evening => (noon + 5.0 / 24.0, noon + 9.0 / 24.0),
-            (None, _) => (noon - 9.0 / 24.0, noon - 5.0 / 24.0),
-        };
-
-        let (p0, p1) = (start - NIGHT_PATH_MARGIN, end + NIGHT_PATH_MARGIN);
-        let n = ((p1 - p0) / NIGHT_SAMPLE_STEP).ceil() as usize;
-        let samples = (0..=n)
-            .map(|i| {
-                snapshot(
-                    &table,
-                    &observer,
-                    p0 + i as f64 * NIGHT_SAMPLE_STEP,
-                    &ATMOSPHERE,
-                )
-            })
-            .collect();
-        let stars = stars_of_date(Instant::from_jd_ut(noon).jd_tt());
-
-        Self {
-            key,
-            table,
-            observer,
-            outcome,
-            criterion,
-            verdict,
-            sun_event,
-            moon_event,
-            evaluation,
-            start,
-            end,
-            samples,
-            stars,
-            ephemeris_name: eph.name().to_owned(),
-        }
+        Self { key, scene }
     }
+}
 
-    /// The Sun and Moon at any instant near the night.
-    pub fn snapshot(&self, jd_ut: f64) -> Snapshot {
-        snapshot(&self.table, &self.observer, jd_ut, &ATMOSPHERE)
-    }
-
-    /// The crescent geometry (ARCL, ARCV, DAZ, width ...) at `jd_ut`, with
-    /// the lag and the age (from the conjunction nearest the evaluation)
-    /// of this night.
-    pub fn geometry(&self, jd_ut: f64) -> Option<CrescentGeometry> {
-        let c = self.outcome.circumstances()?;
-        let dir = if self.key.crescent == Crescent::Evening {
-            1.0
-        } else {
-            -1.0
-        };
-        let age_hours = dir * (jd_ut - c.conjunction.jd_ut) * 24.0;
-        Some(geometry_at(
-            &self.table,
-            &self.observer,
-            jd_ut,
-            c.geometry.lag_minutes,
-            age_hours,
-            &ATMOSPHERE,
-        ))
-    }
-
-    /// The instant the slider starts at: the evaluation ("best") time,
-    /// else the Sun event, else the start of the span.
-    pub fn default_time(&self) -> f64 {
-        self.evaluation
-            .or(self.sun_event)
-            .unwrap_or(self.start)
-            .clamp(self.start, self.end)
+impl Deref for Night {
+    type Target = NightScene;
+    fn deref(&self) -> &NightScene {
+        &self.scene
     }
 }
 
@@ -352,96 +105,33 @@ impl DayKey {
     }
 }
 
-/// Spacing of the daily curves, days (5 minutes).
-pub const DAY_SAMPLE_STEP: f64 = 5.0 / 1440.0;
-
-/// One local calendar day for the Trajectory tab.
+/// One local calendar day for the Trajectory tab: a [`DayScene`] with the
+/// key it was computed for.
 pub struct Day {
     pub key: DayKey,
-    pub table: ApparentTable,
-    pub observer: Observer,
-    /// Local midnight starting the day, UT JD; the day is `[start, start + 1)`.
-    pub start: f64,
-    /// Samples every [`DAY_SAMPLE_STEP`] over the day, both ends included.
-    pub samples: Vec<Snapshot>,
-    pub sun: DayEvents,
-    pub moon: DayEvents,
-    /// Morning start and evening end of civil, nautical and astronomical
-    /// twilight.
-    pub twilights: [(Option<Instant>, Option<Instant>); 3],
-    /// Principal phases from about a month before to two months after.
-    pub phases: Vec<(Phase, Instant)>,
-    pub ephemeris_name: String,
+    scene: DayScene,
 }
 
 impl Day {
     pub fn compute(key: DayKey, eph: &dyn Ephemeris) -> Self {
-        let start = key.date.jd0() - key.tz_hours / 24.0;
-        let table = ApparentTable::with_default_step(
-            eph,
-            Instant::from_jd_ut(start - 1.0),
-            Instant::from_jd_ut(start + 2.0),
-        );
-        let observer = Observer::new(&key.location);
-        let n = (1.0 / DAY_SAMPLE_STEP).round() as usize;
-        let samples = (0..=n)
-            .map(|i| {
-                snapshot(
-                    &table,
-                    &observer,
-                    start + i as f64 * DAY_SAMPLE_STEP,
-                    &ATMOSPHERE,
-                )
-            })
-            .collect();
-        let (t0, t1) = (Instant::from_jd_ut(start), Instant::from_jd_ut(start + 1.0));
-        let loc = &key.location;
-        let sun = day_events(&table, Body::Sun, loc, Horizon::STANDARD, t0, t1);
-        let moon = day_events(&table, Body::Moon, loc, Horizon::STANDARD, t0, t1);
-        let twilights = [Twilight::Civil, Twilight::Nautical, Twilight::Astronomical]
-            .map(|k| twilight(&table, loc, k, t0, t1));
-        let phases = phases_between(eph, t0.add_days(-32.0), t0.add_days(62.0));
-        Self {
-            key,
-            table,
-            observer,
-            start,
-            samples,
-            sun,
-            moon,
-            twilights,
-            phases,
-            ephemeris_name: eph.name().to_owned(),
-        }
+        let scene = DayScene::compute(eph, key.date, key.tz_hours, key.location);
+        Self { key, scene }
     }
+}
 
-    pub fn snapshot(&self, jd_ut: f64) -> Snapshot {
-        snapshot(&self.table, &self.observer, jd_ut, &ATMOSPHERE)
-    }
-
-    /// The first `phase` strictly after `jd_ut`.
-    pub fn next_phase(&self, phase: Phase, jd_ut: f64) -> Option<Instant> {
-        self.phases
-            .iter()
-            .find(|(p, t)| *p == phase && t.jd_ut > jd_ut)
-            .map(|(_, t)| *t)
-    }
-
-    /// The Moon's age at `jd_ut`: days since the last new Moon.
-    pub fn moon_age_days(&self, jd_ut: f64) -> Option<f64> {
-        self.phases
-            .iter()
-            .rev()
-            .find(|(p, t)| *p == Phase::New && t.jd_ut <= jd_ut)
-            .map(|(_, t)| jd_ut - t.jd_ut)
+impl Deref for Day {
+    type Target = DayScene;
+    fn deref(&self) -> &DayScene {
+        &self.scene
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mooncalc_core::MeeusEphemeris;
     use mooncalc_core::angle::DEG;
+    use mooncalc_core::events::phases::Phase;
+    use mooncalc_core::{Instant, MeeusEphemeris};
 
     fn mecca() -> GeoLocation {
         GeoLocation::new(21.4225, 39.8262, 277.0)

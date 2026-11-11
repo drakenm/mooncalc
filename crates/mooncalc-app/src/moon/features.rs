@@ -12,6 +12,9 @@
 //! maria (Oceanus Procellarum, Mare Frigoris, Tranquillitatis,
 //! Fecunditatis, Nubium) as coarse hand-placed polygons. They are meant to
 //! make libration and phase visible, not for mapping.
+//!
+//! Shared by the egui Moon tab and, through [`super::moon_features`], the
+//! Tauri frontend.
 
 /// Mean lunar radius, km (IAU).
 pub const MOON_RADIUS_KM: f64 = 1737.4;

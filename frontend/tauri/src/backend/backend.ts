@@ -29,6 +29,7 @@ import type {
   PngImage,
   SavedFile,
 } from './types';
+import type { SkyApi } from './types-sky';
 import type { CalendarApi } from './types-calendar';
 import type { TablesApi } from './types-tables';
 
@@ -52,6 +53,8 @@ export interface Backend {
   earliestSighting(params: EarliestParams): Promise<EarliestResult>;
   basemap(params: BasemapParams): Promise<Basemap>;
   loadDe440(params: LoadDe440Params): Promise<EphemerisBackendInfo>;
+  /** Sky, Trajectory and Moon tabs. */
+  readonly sky: SkyApi;
 }
 
 /** Every backend method rejects with a BackendError. */

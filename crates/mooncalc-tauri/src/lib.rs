@@ -15,6 +15,11 @@
 //! | `export_map_png` | `ExportPngParams` | `PngImage` |
 //! | `save_map_png` | `ExportPngParams` | [`commands::SavedFile`] (written to Downloads) |
 //! | `location_report` | `LocationReportParams` | `LocationReport` |
+//! | `sky_scene` | `SkySceneParams` | `SkyScene` |
+//! | `sky_stars` | `SkyStarsParams` | `SkyStars` |
+//! | `trajectory_day` | `TrajectoryParams` | `TrajectoryDay` |
+//! | `moon_view` | `MoonViewParams` | `MoonView` |
+//! | `moon_features` | none | `MoonFeatures` |
 //! | `search_cities` | `CitySearchParams` | `Vec<City>` |
 //! | `nearest_city` | `NearestCityParams` | `Option<NearestCity>` |
 //! | `earliest_sighting` | `EarliestParams` | `EarliestResult` |
@@ -108,6 +113,11 @@ pub fn run() {
             commands::export_map_png,
             commands::save_map_png,
             commands::location_report,
+            commands::sky::sky_scene,
+            commands::sky::sky_stars,
+            commands::sky::trajectory_day,
+            commands::sky::moon_view,
+            commands::sky::moon_features,
             commands::search_cities,
             commands::nearest_city,
             commands::earliest_sighting,

@@ -11,10 +11,13 @@
 //!   crater (Meeus ch. 53, `mooncalc_core::libration::lunar_sunrise`).
 
 use mooncalc_core::angle::{DEG, norm_2pi};
-use mooncalc_core::events::phases::SYNODIC_MONTH_DAYS;
-use mooncalc_core::libration::{MoonPhysical, lunar_sunrise, lunar_sunset, sun_altitude_on_moon};
+use mooncalc_core::libration::{MoonPhysical, sun_altitude_on_moon};
 use mooncalc_core::tables::{EphemerisRow, TableOptions, ephemeris_row};
 use mooncalc_core::{Ephemeris, Instant};
+
+// The UI-independent Moon machinery (features, disc projection, libration
+// curve, lunar sunrise) lives in `mooncalc_app::moon`, shared with the
+// Tauri frontend.
 use serde::{Deserialize, Serialize};
 
 use super::TabContext;
@@ -22,8 +25,10 @@ use super::ephemeris::format::{self, AngleStyle};
 use super::ephemeris::{EphKey, ephemeris, set_app_time, time_link};
 
 pub mod disc;
-pub mod features;
 pub mod libration_graph;
+
+/// Named craters and schematic maria, shared with the Tauri frontend.
+pub use mooncalc_app::moon::features;
 
 /// Persisted choices of the Moon tab.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -53,56 +58,17 @@ impl Default for MoonSettings {
     }
 }
 
-/// Parallactic angle q of a body at hour angle `h` and declination `dec`
-/// for an observer at latitude `lat` (radians): the position angle of the
-/// zenith on the body's disc (Meeus eq. 14.1).
-pub fn parallactic_angle(h: f64, dec: f64, lat: f64) -> f64 {
-    h.sin().atan2(lat.tan() * dec.cos() - dec.sin() * h.cos())
-}
+/// Parallactic angle q (Meeus eq. 14.1), shared with the Sky tab.
+pub use mooncalc_app::sky::geometry::parallactic_angle;
+
+/// Lunar sunrise/sunset at a crater after an instant (Meeus ch. 53).
+pub use mooncalc_app::moon::next_lunar_sun_event;
 
 /// Name of the phase from the elongation in longitude λ☾ − λ☉ (radians):
-/// the principal phases within ±6° (about half a day).
+/// the principal phases within ±6° (about half a day); see
+/// [`mooncalc_app::sky::geometry::phase_name`].
 pub fn phase_name(elong_lon: f64) -> &'static str {
-    let e = norm_2pi(elong_lon) / DEG;
-    match e {
-        e if !(6.0..354.0).contains(&e) => "New Moon",
-        e if e < 84.0 => "Waxing crescent",
-        e if e < 96.0 => "First quarter",
-        e if e < 174.0 => "Waxing gibbous",
-        e if e < 186.0 => "Full Moon",
-        e if e < 264.0 => "Waning gibbous",
-        e if e < 276.0 => "Last quarter",
-        _ => "Waning crescent",
-    }
-}
-
-/// The next instant after `jd_tt` (TT) at which the Sun rises (`rise`) or
-/// sets at selenographic (`eta`, `theta`).
-pub fn next_lunar_sun_event(
-    eph: &dyn Ephemeris,
-    eta: f64,
-    theta: f64,
-    jd_tt: f64,
-    rise: bool,
-) -> Option<f64> {
-    let f = |jd: f64| {
-        if rise {
-            lunar_sunrise(eph, eta, theta, jd)
-        } else {
-            lunar_sunset(eph, eta, theta, jd)
-        }
-    };
-    let mut t = f(jd_tt);
-    for _ in 0..3 {
-        if !t.is_finite() {
-            return None;
-        }
-        if t > jd_tt {
-            return Some(t);
-        }
-        t = f(t + SYNODIC_MONTH_DAYS);
-    }
-    None
+    mooncalc_app::sky::geometry::phase_name(elong_lon / DEG)
 }
 
 /// Everything the tab shows for one instant and observer.
@@ -497,7 +463,6 @@ fn crater_ui(ui: &mut egui::Ui, st: &MoonState, tc: &mut TabContext<'_>) -> Opti
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mooncalc_core::MeeusEphemeris;
 
     #[test]
     fn parallactic_angle_signs() {
@@ -521,22 +486,5 @@ mod tests {
         assert_eq!(phase_name(180.0 * DEG), "Full Moon");
         assert_eq!(phase_name(-90.0 * DEG), "Last quarter");
         assert_eq!(phase_name(-30.0 * DEG), "Waning crescent");
-    }
-
-    #[test]
-    fn lunar_sunrise_is_next_and_ordered() {
-        // Copernicus (9.6° N, 20.1° W) gets the Sun about two days after
-        // first quarter: first quarter was 2024 March 17, so sunrise is
-        // around March 19.
-        let eph = MeeusEphemeris::new();
-        let jd = Instant::from_calendar(2024, 3, 11, 0, 0, 0.0).jd_tt();
-        let (eta, theta) = (-20.1 * DEG, 9.6 * DEG);
-        let rise = next_lunar_sun_event(&eph, eta, theta, jd, true).unwrap();
-        let set = next_lunar_sun_event(&eph, eta, theta, jd, false).unwrap();
-        assert!(rise > jd && rise - jd < SYNODIC_MONTH_DAYS);
-        let c = Instant::from_jd_tt(rise).to_calendar();
-        assert_eq!((c.month, c.day), (3, 19));
-        // Sunset follows about half a lunation later.
-        assert!((set - rise - SYNODIC_MONTH_DAYS / 2.0).abs() < 1.5);
     }
 }

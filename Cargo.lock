@@ -3159,6 +3159,7 @@ dependencies = [
  "eframe",
  "egui",
  "egui_extras",
+ "mooncalc-app",
  "mooncalc-atlas",
  "mooncalc-core",
  "mooncalc-hijri",

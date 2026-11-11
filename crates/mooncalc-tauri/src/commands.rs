@@ -278,3 +278,6 @@ pub async fn load_de440(
     let state = state.inner().clone();
     blocking(move || state.load_de440(&params.path)).await
 }
+
+/// Sky, Trajectory and Moon commands.
+pub mod sky;

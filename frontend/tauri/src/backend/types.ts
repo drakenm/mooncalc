@@ -387,5 +387,6 @@ export interface Basemap {
   attribution: string;
 }
 
+export * from './types-sky';
 export * from './types-calendar';
 export * from './types-tables';

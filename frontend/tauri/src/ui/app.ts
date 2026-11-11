@@ -8,8 +8,10 @@ import { EphemerisView } from './ephemeris-view';
 import { createEarliestView } from './earliest-view';
 import { h } from './dom';
 import { MapView } from './map-view';
-import { createPlaceholder, PLACEHOLDERS } from './placeholders';
 import { ReportView } from './report-view';
+import { MoonTabView } from './moon-view';
+import { SkyView } from './sky-view';
+import { TrajectoryView } from './trajectory-view';
 import { createSidebar } from './sidebar';
 
 type TabId = 'map' | 'report' | 'earliest' | 'ephemeris' | 'calendar' | 'sky' | 'moon' | 'trajectory' | 'about';
@@ -72,9 +74,9 @@ export function createApp(ctx: AppContext): HTMLElement {
     },
     { id: 'ephemeris', label: 'Ephemeris', ...view(new EphemerisView(ctx)) },
     { id: 'calendar', label: 'Calendar', ...view(new CalendarView(ctx)) },
-    { id: 'sky', label: 'Sky', panel: createPlaceholder(PLACEHOLDERS.sky) },
-    { id: 'moon', label: 'Moon', panel: createPlaceholder(PLACEHOLDERS.moon) },
-    { id: 'trajectory', label: 'Trajectory', panel: createPlaceholder(PLACEHOLDERS.trajectory) },
+    { id: 'sky', label: 'Sky', ...view(new SkyView(ctx.backend, ctx.store)) },
+    { id: 'moon', label: 'Moon', ...view(new MoonTabView(ctx.backend, ctx.store)) },
+    { id: 'trajectory', label: 'Trajectory', ...view(new TrajectoryView(ctx.backend, ctx.store)) },
     { id: 'about', label: 'About', panel: createAbout(ctx.info) },
   ];
 

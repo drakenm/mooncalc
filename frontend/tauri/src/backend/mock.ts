@@ -7,6 +7,7 @@
 
 import { BackendError, type Backend } from './backend';
 import { bytesToBase64 } from './codec';
+import { mockSkyApi } from './mock-sky';
 import { mockCalendarApi, mockTablesApi } from './mock-extras';
 import {
   NO_DATA,
@@ -259,4 +260,6 @@ export class MockBackend implements Backend {
   async loadDe440(_p: LoadDe440Params): Promise<EphemerisBackendInfo> {
     throw unsupported('DE440');
   }
+
+  readonly sky = mockSkyApi();
 }
