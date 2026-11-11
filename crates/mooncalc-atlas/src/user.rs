@@ -27,9 +27,15 @@ pub struct UserLocation {
     pub lon_deg: f64,
     #[serde(default)]
     pub elevation_m: f64,
-    /// Fixed UTC offset used for local times, hours (east-positive).
+    /// Fixed UTC offset used for local times, hours (east-positive), when
+    /// there is no `time_zone`.
     #[serde(default)]
     pub utc_offset_hours: f64,
+    /// IANA time zone for local times (with its DST rules), e.g.
+    /// `Europe/London`. Absent in files saved before zones were supported;
+    /// an unknown name falls back to `utc_offset_hours` ([`Self::zone`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub time_zone: Option<String>,
 }
 
 impl UserLocation {
@@ -46,7 +52,20 @@ impl UserLocation {
             lon_deg,
             elevation_m,
             utc_offset_hours,
+            time_zone: None,
         }
+    }
+
+    /// The same location with an IANA time zone.
+    pub fn with_time_zone(mut self, time_zone: Option<String>) -> Self {
+        self.time_zone = time_zone.filter(|z| !z.trim().is_empty());
+        self
+    }
+
+    /// The zone for local times: the IANA zone when set and known, else the
+    /// fixed offset.
+    pub fn zone(&self) -> crate::Zone {
+        crate::Zone::iana_or_fixed(self.time_zone.as_deref(), self.utc_offset_hours)
     }
 
     pub fn location(&self) -> GeoLocation {
@@ -293,6 +312,38 @@ impl Atlas {
             out.extend(self.search(query, rest).into_iter().map(Place::City));
         }
         out
+    }
+}
+
+#[cfg(test)]
+mod zone_tests {
+    use super::*;
+
+    #[test]
+    fn time_zone_is_optional_and_round_trips() {
+        let old = r#"{"version":1,"locations":[{"name":"Home","lat_deg":51.5,"lon_deg":0.0,"utc_offset_hours":1.0}]}"#;
+        let a = UserAtlas::from_json_str(old).unwrap();
+        let home = a.get(0).unwrap();
+        assert_eq!(home.time_zone, None);
+        assert_eq!(home.zone(), crate::Zone::fixed_hours(1.0));
+
+        let mut b = UserAtlas::new();
+        let loc = UserLocation::new("Office", 40.7, -74.0, 10.0, -5.0)
+            .with_time_zone(Some("America/New_York".into()));
+        b.add(loc).unwrap();
+        let json = b.to_json_string();
+        assert!(json.contains("America/New_York"));
+        let back = UserAtlas::from_json_str(&json).unwrap();
+        assert_eq!(
+            back.get(0).unwrap().zone().iana_name(),
+            Some("America/New_York")
+        );
+        // No key is written without a zone, so older builds read the file.
+        assert!(!a.to_json_string().contains("time_zone"));
+        // An unknown zone falls back to the fixed offset.
+        let odd =
+            UserLocation::new("X", 0.0, 0.0, 0.0, 2.0).with_time_zone(Some("Mars/Base".into()));
+        assert_eq!(odd.zone(), crate::Zone::fixed_hours(2.0));
     }
 }
 
