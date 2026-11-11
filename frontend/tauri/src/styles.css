@@ -27,6 +27,8 @@
   --map-label: rgb(30 40 60 / 0.7);
   --map-marker: #111827;
   --map-marker-halo: rgb(255 255 255 / 0.85);
+  --map-coast: rgb(30 40 55 / 0.85);
+  --map-border: rgb(30 40 55 / 0.4);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -51,6 +53,8 @@
     --map-label: rgb(220 230 245 / 0.65);
     --map-marker: #ffffff;
     --map-marker-halo: rgb(0 0 0 / 0.7);
+    --map-coast: rgb(225 232 242 / 0.8);
+    --map-border: rgb(225 232 242 / 0.35);
   }
 }
 
@@ -446,6 +450,20 @@ input:invalid {
   pointer-events: none;
 }
 
+.map-info {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 18px;
+  padding: 0 12px 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.map-info strong {
+  color: var(--text);
+}
+
 .map-footer {
   display: flex;
   flex-direction: column;
@@ -491,7 +509,7 @@ input:invalid {
 .report-view,
 .placeholder,
 .about {
-  max-width: 820px;
+  max-width: 1100px;
   padding: 24px 28px;
 }
 
@@ -583,4 +601,105 @@ input:invalid {
 .fatal pre {
   color: var(--danger);
   white-space: pre-wrap;
+}
+
+/* ---- Report and earliest sighting ----------------------------------------- */
+
+.report-view h3 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 16px;
+  margin: 22px 0 8px;
+}
+
+.report-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+  gap: 0 24px;
+}
+
+.report-grid .kv th {
+  width: 52%;
+}
+
+.status-line {
+  margin: 0 0 8px;
+  color: var(--text-muted);
+}
+
+.status-crescent {
+  color: var(--text);
+}
+
+.zone-chip {
+  display: inline-block;
+  min-width: 26px;
+  padding: 1px 7px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 700;
+  text-align: center;
+  border: 1px solid rgb(0 0 0 / 0.15);
+}
+
+.criteria-table {
+  width: 100%;
+  margin-top: 12px;
+  border-collapse: collapse;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.criteria-table th,
+.criteria-table td {
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+}
+
+.criteria-table th {
+  font-weight: 600;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.criteria-table .num {
+  text-align: right;
+}
+
+.criteria-table tbody tr {
+  cursor: pointer;
+}
+
+.criteria-table tbody tr:hover {
+  background: var(--surface-2);
+}
+
+.criteria-table tr.selected {
+  background: var(--accent-soft);
+}
+
+.earliest-view .toolbar {
+  padding: 4px 0 8px;
+}
+
+.earliest-view input[type='number'] {
+  width: 64px;
+}
+
+.earliest-view .criteria-table tbody tr {
+  cursor: default;
+}
+
+.inline-row {
+  display: flex;
+  gap: 6px;
+}
+
+.de440 {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }

@@ -81,3 +81,28 @@ export function zoneOffsetHours(timeZone: string, at: Date): number | null {
     return null;
   }
 }
+
+/** The symbol of a criterion's value: Yallop's q, Odeh's V, else "value". */
+export function valueSymbol(criterionId: string): string {
+  return criterionId === 'yallop' ? 'q' : criterionId === 'odeh' ? 'V' : 'value';
+}
+
+/** A criterion value with an explicit sign. */
+export function formatValue(v: number, digits = 3): string {
+  return `${v >= 0 ? '+' : '−'}${Math.abs(v).toFixed(digits)}`;
+}
+
+/** Save base64 data as a file through the browser's download mechanism. */
+export function downloadBase64(base64: string, fileName: string, mime: string): void {
+  const bin = atob(base64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  const url = URL.createObjectURL(new Blob([bytes], { type: mime }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = fileName;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
+}

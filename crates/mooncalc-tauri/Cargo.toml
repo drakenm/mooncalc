@@ -22,14 +22,12 @@ default = []
 # Vite dev server. `tauri build` turns this on itself; enable it by hand for a
 # standalone `cargo build`.
 custom-protocol = ["tauri/custom-protocol"]
-# Use JPL DE440/DE440s files (chosen at runtime) instead of the built-in Meeus/ELP theory.
-de440 = ["dep:mooncalc-spk"]
+# Use JPL DE440/DE440s files (chosen at runtime by path) besides the built-in
+# Meeus/ELP theory.
+de440 = ["mooncalc-app/de440"]
 
 [dependencies]
-mooncalc-core.workspace = true
-mooncalc-visibility.workspace = true
-mooncalc-maps.workspace = true
-mooncalc-spk = { workspace = true, optional = true }
+mooncalc-app.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tauri.workspace = true

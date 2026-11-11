@@ -17,8 +17,14 @@ const COMMANDS: &[&str] = &[
     "app_info",
     "criteria_list",
     "compute_visibility_map",
+    "export_map_png",
+    "save_map_png",
     "location_report",
     "search_cities",
+    "nearest_city",
+    "earliest_sighting",
+    "basemap",
+    "load_de440",
 ];
 
 const PLACEHOLDER: &str = r#"<!doctype html>

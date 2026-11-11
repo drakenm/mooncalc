@@ -7,7 +7,13 @@
     "allow-app-info",
     "allow-criteria-list",
     "allow-compute-visibility-map",
+    "allow-export-map-png",
+    "allow-save-map-png",
     "allow-location-report",
-    "allow-search-cities"
+    "allow-search-cities",
+    "allow-nearest-city",
+    "allow-earliest-sighting",
+    "allow-basemap",
+    "allow-load-de440"
   ]
 }

@@ -100,7 +100,7 @@ A merge includes the selected commit's entire ancestry. Do not offer a later sta
   - `cargo fmt --all -- --check`
   - `cargo clippy --workspace --all-targets -- -D warnings`
   - `cargo test --workspace`
-  - `cargo build --target wasm32-unknown-unknown -p mooncalc-core -p mooncalc-visibility -p mooncalc-maps -p mooncalc-hijri -p mooncalc-atlas` when touching those portable crates (see the portability rule in [architecture](docs/architecture.md)).
+  - `cargo build --target wasm32-unknown-unknown -p mooncalc-core -p mooncalc-visibility -p mooncalc-maps -p mooncalc-hijri -p mooncalc-atlas -p mooncalc-app` when touching those portable crates (see the portability rule in [architecture](docs/architecture.md)).
   - `npm run build` / `npm run check` in `frontend/tauri/` when touching the TypeScript frontend. npm packages follow the same 14-day pinning rule, with exact versions and a committed lockfile.
   - `cargo build -p mooncalc-gui --features de440` when touching the SPK/DE440 backend or GUI feature wiring.
   - On this machine the toolchain lives in `%USERPROFILE%\.cargo\bin`, which is not on `PATH`: prefix commands with `export PATH="$USERPROFILE/.cargo/bin:$PATH";` in Bash.

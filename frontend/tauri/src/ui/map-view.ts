@@ -1,18 +1,23 @@
-// Map tab: world visibility map on a canvas with zoom, pan, hover readout and
-// click-to-set-location.
+// Map tab: world visibility map on a canvas with zoom, pan, hover readout,
+// click-to-set-location, coastlines, legend and PNG export.
 //
 // The view is an equirectangular camera: a centre (lon, lat) and a scale in
 // CSS pixels per degree. Screen x grows with longitude, y with falling latitude.
+// Zones are rasterised at device resolution for the current camera
+// (map-image.ts); while panning or zooming, the last raster is transformed
+// as a preview and re-rendered once the camera settles.
 
-import { BackendError, type Backend } from '../backend';
-import { changed, type AppState, type Store } from '../state';
+import { BackendError, type Backend, type MapParams, type MapResult } from '../backend';
+import { changed, localDate, type AppState, type Store } from '../state';
+import { BasemapLayer } from './basemap-layer';
 import { debounce, h, replaceChildren } from './dom';
-import { formatDate, formatLat, formatLon } from './format';
-import { paintZones, zoneAt, type ZoneImage } from './map-image';
+import { downloadBase64, formatDate, formatLat, formatLon, formatUtDateTime, formatValue, valueSymbol } from './format';
+import { decodeMap, rasterZones, valueAt, zoneAt, type ZoneData } from './map-image';
 
 const MAX_ZOOM = 48;
 const CLICK_SLOP_PX = 4;
 const RESOLUTIONS = [
+  { deg: 2, label: '2° (180 × 90)' },
   { deg: 1, label: '1° (360 × 180)' },
   { deg: 0.5, label: '0.5° (720 × 360)' },
   { deg: 0.25, label: '0.25° (1440 × 720)' },
@@ -34,6 +39,8 @@ interface Palette {
   label: string;
   marker: string;
   markerHalo: string;
+  coast: string;
+  border: string;
 }
 
 function readPalette(el: Element): Palette {
@@ -46,6 +53,8 @@ function readPalette(el: Element): Palette {
     label: v('--map-label'),
     marker: v('--map-marker'),
     markerHalo: v('--map-marker-halo'),
+    coast: v('--map-coast'),
+    border: v('--map-border'),
   };
 }
 
@@ -56,11 +65,19 @@ export class MapView {
   private readonly ctx: CanvasRenderingContext2D;
   private readonly readout = h('span', { class: 'readout', 'aria-live': 'off' });
   private readonly status = h('span', { class: 'status' });
+  private readonly info = h('div', { class: 'map-info' });
   private readonly overlay = h('div', { class: 'map-overlay', hidden: true });
   private readonly legend = h('ul', { class: 'legend' });
   private readonly resolutionSelect: HTMLSelectElement;
+  private readonly exportButton: HTMLButtonElement;
+  private readonly basemap: BasemapLayer;
 
-  private image: ZoneImage | null = null;
+  private result: MapResult | null = null;
+  private data: ZoneData | null = null;
+  /** Zones rasterised for `zoneCamera` at device resolution. */
+  private readonly zoneCanvas = document.createElement('canvas');
+  private zoneCamera: Camera | null = null;
+  private rasterMs = 0;
   private camera: Camera = { lon: 0, lat: 0, scale: 1 };
   private size = { w: 0, h: 0 };
   /** Read from CSS custom properties once the element is in the document. */
@@ -71,6 +88,7 @@ export class MapView {
   private hover: { x: number; y: number } | null = null;
   private drag: { x: number; y: number; lon: number; lat: number; moved: boolean; id: number } | null = null;
   private frame = 0;
+  private readonly scheduleRaster = debounce(() => this.renderZones(), 90);
 
   constructor(
     private readonly backend: Backend,
@@ -79,6 +97,7 @@ export class MapView {
     const ctx = this.canvas.getContext('2d');
     if (!ctx) throw new Error('2D canvas unavailable');
     this.ctx = ctx;
+    this.basemap = new BasemapLayer(backend, () => this.requestDraw());
 
     this.resolutionSelect = h(
       'select',
@@ -87,6 +106,11 @@ export class MapView {
         onchange: () => this.store.update({ mapResolutionDeg: Number(this.resolutionSelect.value) }),
       },
       ...RESOLUTIONS.map((r) => h('option', { value: r.deg }, r.label)),
+    );
+    this.exportButton = h(
+      'button',
+      { type: 'button', class: 'button small', title: 'Render a 2048-pixel PNG with base map and legend', onclick: () => void this.exportPng() },
+      'Export PNG',
     );
 
     const stage = h('div', { class: 'map-stage' }, this.canvas, this.overlay);
@@ -100,8 +124,10 @@ export class MapView {
         h('button', { type: 'button', class: 'button small', onclick: () => this.fit() }, 'Fit'),
         h('button', { type: 'button', class: 'button small', onclick: () => this.zoomBy(1.5) }, '+'),
         h('button', { type: 'button', class: 'button small', onclick: () => this.zoomBy(1 / 1.5) }, '−'),
+        this.exportButton,
         this.status,
       ),
+      this.info,
       stage,
       h('div', { class: 'map-footer' }, this.readout, this.legend),
     );
@@ -117,11 +143,8 @@ export class MapView {
     const recompute = debounce(() => void this.compute(), 120);
     this.store.subscribe((s, prev) => {
       this.resolutionSelect.value = String(s.mapResolutionDeg);
-      const mapInputs = s.instant.year !== prev.instant.year ||
-        s.instant.month !== prev.instant.month ||
-        s.instant.day !== prev.instant.day ||
-        changed(s, prev, ['criterionId', 'crescent', 'ephemerisId', 'mapResolutionDeg']);
-      if (mapInputs) {
+      const dateChanged = JSON.stringify(localDate(s)) !== JSON.stringify(localDate(prev));
+      if (dateChanged || changed(s, prev, ['criterionId', 'crescent', 'ephemerisId', 'mapResolutionDeg'])) {
         this.stale = true;
         if (this.active) recompute();
       }
@@ -140,7 +163,26 @@ export class MapView {
     }
   }
 
+  /** Centre the view on a point, zooming in to at least 2.5× the fit. */
+  centreOn(latDeg: number, lonDeg: number): void {
+    this.camera.scale = Math.max(this.camera.scale, this.fitScale() * 2.5);
+    this.camera.lon = lonDeg;
+    this.camera.lat = latDeg;
+    this.clampCamera();
+    this.requestDraw();
+  }
+
   // --- Data ---------------------------------------------------------------
+
+  private mapParams(s: AppState): MapParams {
+    return {
+      date: localDate(s),
+      criterionId: s.criterionId,
+      crescent: s.crescent,
+      resolutionDeg: s.mapResolutionDeg,
+      ephemerisId: s.ephemerisId,
+    };
+  }
 
   private async compute(): Promise<void> {
     const s: AppState = this.store.get();
@@ -149,32 +191,53 @@ export class MapView {
     this.showOverlay('Computing map…');
     const t0 = performance.now();
     try {
-      const result = await this.backend.computeVisibilityMap({
-        date: { year: s.instant.year, month: s.instant.month, day: s.instant.day },
-        criterionId: s.criterionId,
-        crescent: s.crescent,
-        resolutionDeg: s.mapResolutionDeg,
-        ephemerisId: s.ephemerisId,
-      });
+      const result = await this.backend.computeVisibilityMap(this.mapParams(s));
       if (seq !== this.requestSeq) return;
       const roundTripMs = performance.now() - t0;
-      const image = paintZones(result);
-      this.image = image;
+      this.data = decodeMap(result);
+      this.result = result;
+      this.zoneCamera = null;
       this.renderLegend();
+      this.renderInfo();
       this.overlay.hidden = true;
+      const t = result.timing;
       replaceChildren(
         this.status,
-        result.synthetic ? h('span', { class: 'badge badge-warn' }, 'Synthetic placeholder') : null,
-        ` ${formatDate(result.date)} ${result.crescent} · ${result.grid.cols} × ${result.grid.rows} · ` +
-          `backend ${result.computeMs.toFixed(0)} ms · round trip ${roundTripMs.toFixed(0)} ms · ` +
-          `paint ${image.paintMs.toFixed(0)} ms`,
+        `${result.grid.cols} × ${result.grid.rows} · backend ${t.totalMs.toFixed(0)} ms ` +
+          `(${t.threads} threads) · round trip ${roundTripMs.toFixed(0)} ms · decode ${this.data.decodeMs.toFixed(0)} ms`,
       );
-      this.requestDraw();
+      this.draw();
     } catch (err) {
       if (seq !== this.requestSeq) return;
       const e = BackendError.from(err);
+      if (e.code === 'cancelled') return;
       this.showOverlay(`Could not compute the map: ${e.message}`);
       this.stale = true;
+    }
+  }
+
+  private async exportPng(): Promise<void> {
+    const s = this.store.get();
+    this.exportButton.disabled = true;
+    try {
+      const params = {
+        map: { ...this.mapParams(s), includeValues: false },
+        widthPx: 2048,
+        legend: true,
+        marker: { location: s.location, label: s.locationName?.split(',')[0] ?? null },
+      };
+      if (this.backend.saveMapPng) {
+        const saved = await this.backend.saveMapPng(params);
+        this.showOverlay(`Saved ${saved.width} × ${saved.height} PNG to ${saved.path}`);
+        setTimeout(() => (this.overlay.hidden = true), 6000);
+      } else {
+        const png = await this.backend.exportMapPng(params);
+        downloadBase64(png.png, png.fileName, 'image/png');
+      }
+    } catch (err) {
+      this.showOverlay(`Export failed: ${BackendError.from(err).message}`);
+    } finally {
+      this.exportButton.disabled = false;
     }
   }
 
@@ -184,24 +247,53 @@ export class MapView {
   }
 
   private renderLegend(): void {
-    if (!this.image) return;
+    const r = this.result;
+    if (!r) return;
     const swatch = (rgb: string) => {
       const s = h('span', { class: 'swatch' });
       s.style.background = rgb;
       return s;
     };
+    const total = r.grid.rows * r.grid.cols;
+    const pct = (n: number) => (n === 0 ? '' : ` · ${((100 * n) / total).toFixed(n * 1000 < total ? 1 : 0)} %`);
+    const none = total - r.zoneCounts.reduce((a, b) => a + b, 0);
     replaceChildren(
       this.legend,
-      ...this.image.legend.map((z) =>
+      ...r.legend.map((z, i) =>
         h(
           'li',
-          { title: z.description },
+          { title: `${z.description}${pct(r.zoneCounts[i] ?? 0)}` },
           swatch(`rgb(${z.rgb.join(' ')})`),
           h('strong', {}, z.code),
           h('span', {}, z.description),
         ),
       ),
-      h('li', {}, h('span', { class: 'swatch swatch-none' }), h('span', {}, 'No evaluation')),
+      h('li', { title: `Moon sets first, before conjunction, or no sunset${pct(none)}` }, h('span', { class: 'swatch swatch-none' }), h('span', {}, 'No crescent')),
+    );
+  }
+
+  private renderInfo(): void {
+    const r = this.result;
+    if (!r) return;
+    const sym = valueSymbol(r.criterionId);
+    const best = r.best;
+    const zone = best ? r.legend[best.zone] : null;
+    replaceChildren(
+      this.info,
+      h('span', {}, h('strong', {}, `${r.criterionName}`), ` · ${formatDate(r.date)} ${r.crescent}`),
+      h('span', {}, 'Conjunction ', h('strong', {}, formatUtDateTime(r.conjunction))),
+      h('span', {}, `Evaluated at: ${r.evaluationTime}`),
+      best && zone
+        ? h(
+            'span',
+            {},
+            'Best: ',
+            h('strong', {}, zone.code),
+            ` at ${formatLat(best.latDeg, 1)} ${formatLon(best.lonDeg, 1)}`,
+            best.value !== null ? ` (${sym} ${formatValue(best.value)})` : '',
+          )
+        : h('span', {}, 'No crescent anywhere on this date'),
+      h('span', { class: 'hint' }, r.ephemeris),
     );
   }
 
@@ -257,6 +349,7 @@ export class MapView {
     if (wasFit) this.camera = { lon: 0, lat: 0, scale: this.fitScale() };
     else this.camera.scale = Math.max(this.camera.scale, this.fitScale());
     this.clampCamera();
+    this.zoneCamera = null;
     this.draw();
   }
 
@@ -308,7 +401,7 @@ export class MapView {
       if (!d || d.id !== e.pointerId) return;
       this.drag = null;
       cv.classList.remove('dragging');
-      if (click && !d.moved) this.setLocationAt(this.localPoint(e));
+      if (click && !d.moved) void this.setLocationAt(this.localPoint(e));
     };
     cv.addEventListener('pointerup', (e) => endDrag(e, true));
     cv.addEventListener('pointercancel', (e) => endDrag(e, false));
@@ -337,14 +430,22 @@ export class MapView {
     });
   }
 
-  private setLocationAt(p: { x: number; y: number }): void {
+  private async setLocationAt(p: { x: number; y: number }): Promise<void> {
     const { lon, lat } = this.toGeo(p.x, p.y);
     if (lat < -90 || lat > 90 || lon < -180 || lon > 180) return;
-    const s = this.store.get();
-    this.store.update({
-      location: { latDeg: +lat.toFixed(4), lonDeg: +lon.toFixed(4), elevationM: s.location.elevationM },
-      locationName: null,
-    });
+    const location = { latDeg: +lat.toFixed(4), lonDeg: +lon.toFixed(4), elevationM: 0 };
+    this.store.update({ location, locationName: null });
+    try {
+      const near = await this.backend.nearestCity({ latDeg: location.latDeg, lonDeg: location.lonDeg });
+      const s = this.store.get();
+      if (!near || s.location !== location) return;
+      const km = near.distanceKm;
+      this.store.update({
+        locationName: km < 5 ? `${near.city.name}, ${near.city.country}` : `${km.toFixed(0)} km from ${near.city.name}, ${near.city.country}`,
+      });
+    } catch {
+      // The name is a nicety; the coordinates are set.
+    }
   }
 
   private updateReadout(): void {
@@ -357,9 +458,17 @@ export class MapView {
       this.readout.textContent = 'Outside the map';
       return;
     }
-    const z = this.image ? zoneAt(this.image, lat, lon) : null;
-    const zone = z === null ? 'no evaluation' : `${this.image!.legend[z]!.code}: ${this.image!.legend[z]!.description}`;
-    this.readout.textContent = `${formatLat(lat)}  ${formatLon(lon)} · ${zone}`;
+    let zone = '';
+    if (this.data && this.result) {
+      const z = zoneAt(this.data, lat, lon);
+      const v = valueAt(this.data, lat, lon);
+      const sym = valueSymbol(this.result.criterionId);
+      zone =
+        z === null
+          ? ' · no crescent'
+          : ` · ${this.data.legend[z]!.code}: ${this.data.legend[z]!.description}${v !== null ? ` · ${sym} = ${formatValue(v)}` : ''}`;
+    }
+    this.readout.textContent = `${formatLat(lat)}  ${formatLon(lon)}${zone}`;
   }
 
   // --- Drawing ------------------------------------------------------------
@@ -370,6 +479,51 @@ export class MapView {
       this.frame = 0;
       this.draw();
     });
+  }
+
+  /** Rasterise the zones for the current camera at device resolution. */
+  private renderZones(): void {
+    if (!this.data || this.size.w === 0) return;
+    const t0 = performance.now();
+    const W = this.canvas.width;
+    const H = this.canvas.height;
+    const dpr = W / this.size.w;
+    if (this.zoneCanvas.width !== W || this.zoneCanvas.height !== H) {
+      this.zoneCanvas.width = W;
+      this.zoneCanvas.height = H;
+    }
+    const zctx = this.zoneCanvas.getContext('2d');
+    if (!zctx) return;
+    const image = zctx.createImageData(W, H);
+    const origin = this.toGeo(0, 0);
+    const step = 1 / (this.camera.scale * dpr);
+    rasterZones(this.data, image, { lon0: origin.lon, dLon: step, lat0: origin.lat, dLat: step });
+    zctx.putImageData(image, 0, 0);
+    this.zoneCamera = { ...this.camera };
+    this.rasterMs = performance.now() - t0;
+    this.draw();
+  }
+
+  private drawZones(): void {
+    if (!this.data) return;
+    const z = this.zoneCamera;
+    const c = this.camera;
+    if (!z) {
+      this.renderZones();
+      return;
+    }
+    const { w, h: ht } = this.size;
+    if (z.lon === c.lon && z.lat === c.lat && z.scale === c.scale) {
+      this.ctx.drawImage(this.zoneCanvas, 0, 0, w, ht);
+      return;
+    }
+    // Preview: the last raster under the camera change, then re-render.
+    const k = c.scale / z.scale;
+    const dx = w / 2 + (z.lon - c.lon) * c.scale - (w / 2) * k;
+    const dy = ht / 2 - (z.lat - c.lat) * c.scale - (ht / 2) * k;
+    this.ctx.imageSmoothingEnabled = true;
+    this.ctx.drawImage(this.zoneCanvas, dx, dy, w * k, ht * k);
+    this.scheduleRaster();
   }
 
   private draw(): void {
@@ -386,17 +540,19 @@ export class MapView {
     ctx.fillStyle = pal.ocean;
     ctx.fillRect(nw.x, nw.y, se.x - nw.x, se.y - nw.y);
 
-    if (this.image) {
-      const g = this.image.grid;
-      const a = this.toScreen(g.lonMinDeg, g.latMaxDeg);
-      const b = this.toScreen(g.lonMaxDeg, g.latMinDeg);
-      // Smooth when shrinking the grid, crisp cells when enlarging it.
-      const cellPx = ((b.x - a.x) / g.cols) * dpr;
-      ctx.imageSmoothingEnabled = cellPx < 1;
-      ctx.drawImage(this.image.bitmap, a.x, a.y, b.x - a.x, b.y - a.y);
-    }
+    this.drawZones();
 
+    const tl = this.toGeo(0, 0);
+    const br = this.toGeo(w, ht);
+    this.basemap.draw(
+      ctx,
+      (lon, lat) => this.toScreen(lon, lat),
+      { west: tl.lon, east: br.lon, south: br.lat, north: tl.lat },
+      this.camera.scale / this.fitScale(),
+      { coast: pal.coast, border: pal.border },
+    );
     this.drawGraticule(pal, nw, se);
+    this.drawBest(pal);
     this.drawMarker(pal);
   }
 
@@ -432,6 +588,26 @@ export class MapView {
     }
   }
 
+  /** A small star at the best cell. */
+  private drawBest(pal: Palette): void {
+    const best = this.result?.best;
+    if (!best) return;
+    const { ctx } = this;
+    const { x, y } = this.toScreen(best.lonDeg, best.latDeg);
+    ctx.beginPath();
+    for (let i = 0; i < 10; i++) {
+      const r = i % 2 === 0 ? 7 : 3;
+      const a = -Math.PI / 2 + (i * Math.PI) / 5;
+      ctx.lineTo(x + r * Math.cos(a), y + r * Math.sin(a));
+    }
+    ctx.closePath();
+    ctx.fillStyle = '#ffffff';
+    ctx.strokeStyle = pal.marker === '#ffffff' ? '#000000' : pal.marker;
+    ctx.lineWidth = 1.2;
+    ctx.fill();
+    ctx.stroke();
+  }
+
   private drawMarker(pal: Palette): void {
     const { ctx } = this;
     const loc = this.store.get().location;
@@ -454,5 +630,10 @@ export class MapView {
     ctx.moveTo(x, y + 7);
     ctx.lineTo(x, y + 11);
     ctx.stroke();
+  }
+
+  /** Last zone raster time, for diagnostics. */
+  get lastRasterMs(): number {
+    return this.rasterMs;
   }
 }

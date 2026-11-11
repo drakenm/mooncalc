@@ -1,6 +1,6 @@
 // Application state shared by the sidebar and the tabs.
 
-import type { Crescent, Location, UtDateTime } from './backend';
+import type { CivilDate, Crescent, Location, UtDateTime } from './backend';
 
 export interface AppState {
   /** Date and time of interest, UT (seconds kept at 0 by the UI). */
@@ -13,6 +13,8 @@ export interface AppState {
   criterionId: string;
   crescent: Crescent;
   ephemerisId: string;
+  /** Path of the DE440/DE440s .bsp file last loaded (desktop only). */
+  de440Path: string;
   /** Map grid spacing, degrees. */
   mapResolutionDeg: number;
 }
@@ -42,7 +44,8 @@ export function defaultState(): AppState {
     criterionId: 'yallop',
     crescent: 'evening',
     ephemerisId: 'meeus',
-    mapResolutionDeg: 0.25,
+    de440Path: '',
+    mapResolutionDeg: 0.5,
   };
 }
 
@@ -91,6 +94,18 @@ export class Store {
       // Storage unavailable (private mode, quota): state is just not remembered.
     }
   }
+}
+
+/**
+ * The local civil date of the selected instant (UT shifted by the time-zone
+ * offset): the date whose evening the map and the report show.
+ */
+export function localDate(s: Pick<AppState, 'instant' | 'tzOffsetHours'>): CivilDate {
+  const minutes = s.instant.hour * 60 + s.instant.minute + Math.round(s.tzOffsetHours * 60);
+  const dayShift = Math.floor(minutes / 1440);
+  const base = new Date(0);
+  base.setUTCFullYear(s.instant.year, s.instant.month - 1, s.instant.day + dayShift);
+  return { year: base.getUTCFullYear(), month: base.getUTCMonth() + 1, day: base.getUTCDate() };
 }
 
 /** Shallow equality on the listed keys, for "did anything relevant change?". */

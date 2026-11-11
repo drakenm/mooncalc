@@ -7,6 +7,7 @@ members = [
     "crates/mooncalc-hijri",
     "crates/mooncalc-atlas",
     "crates/mooncalc-spk",
+    "crates/mooncalc-app",
     "crates/mooncalc-gui",
     "crates/mooncalc-tauri",
 ]
@@ -26,6 +27,7 @@ mooncalc-maps = { path = "crates/mooncalc-maps" }
 mooncalc-hijri = { path = "crates/mooncalc-hijri" }
 mooncalc-atlas = { path = "crates/mooncalc-atlas" }
 mooncalc-spk = { path = "crates/mooncalc-spk" }
+mooncalc-app = { path = "crates/mooncalc-app" }
 
 # Third-party pins (released >= 14 days before adoption; see AGENTS.md).
 eframe = { version = "=0.37.0", features = ["persistence"] }
