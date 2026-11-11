@@ -10,14 +10,14 @@
 //! (ch. 53); topocentric places and refraction from
 //! [`crate::topocentric`], [`crate::transform`] and [`crate::refraction`]
 //! (ch. 13, 16, 40). The Moon's age is measured from the geocentric
-//! conjunction in apparent ecliptic longitude: the mean new moon of Meeus
-//! eq. 49.1 refined by Newton iteration against the ephemeris, or a
-//! conjunction instant supplied by the caller.
+//! conjunction in apparent ecliptic longitude, found by
+//! [`crate::events::phases`] (Meeus ch. 49 refined against the ephemeris),
+//! or from a conjunction instant supplied by the caller.
 
-use crate::angle::{DEG, norm_2pi, norm_pi};
+use crate::angle::{DEG, norm_2pi};
 use crate::coords::{Ecliptic, Equatorial, GeoLocation, Horizontal};
-use crate::eclipses::{lunation_at, mean_lunation_jde};
 use crate::ephemeris::Ephemeris;
+use crate::events::phases::{Phase, SYNODIC_MONTH_DAYS, phase_near_tt};
 use crate::illumination::Illumination;
 use crate::libration::{MoonPhysical, physical_ephemeris, topocentric_physical_ephemeris};
 use crate::nutation::NutationObliquity;
@@ -99,37 +99,17 @@ pub struct EphemerisRow {
     pub topocentric_physical: Option<MoonPhysical>,
 }
 
-/// Geocentric conjunction in apparent ecliptic longitude nearest the mean
-/// new moon `k` (Meeus eq. 49.1), by Newton iteration on λ☾ − λ☉.
-fn conjunction(eph: &dyn Ephemeris, k: i64) -> f64 {
-    let elong = |jd: f64| norm_pi(eph.moon_ecliptic(jd).lon - eph.sun_ecliptic(jd).lon);
-    let mut jd = mean_lunation_jde(k as f64);
-    for _ in 0..10 {
-        let h = 1e-3;
-        let rate = (elong(jd + h) - elong(jd - h)) / (2.0 * h);
-        let step = elong(jd) / rate;
-        jd -= step;
-        if step.abs() < 1e-8 {
-            break;
-        }
-    }
-    jd
-}
-
-/// The last geocentric conjunction at or before `jd_tt` and the next one.
+/// The last geocentric conjunction at or before `jd_tt` and the next one
+/// (TT Julian Days), from [`phase_near_tt`].
 fn bracketing_conjunctions(eph: &dyn Ephemeris, jd_tt: f64) -> (f64, f64) {
-    // The true conjunction is within a day of the mean one, so start one
-    // lunation ahead and step back.
-    let mut k = lunation_at(jd_tt) + 2;
-    let mut next = conjunction(eph, k);
-    loop {
-        let c = conjunction(eph, k - 1);
-        if c <= jd_tt {
-            return (c, next);
-        }
-        next = c;
-        k -= 1;
+    let mut last = phase_near_tt(eph, Phase::New, jd_tt);
+    if last > jd_tt {
+        last = phase_near_tt(eph, Phase::New, last - SYNODIC_MONTH_DAYS);
     }
+    (
+        last,
+        phase_near_tt(eph, Phase::New, last + SYNODIC_MONTH_DAYS),
+    )
 }
 
 fn body_row(
@@ -242,8 +222,14 @@ pub fn ephemeris_table(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::events::phases::meeus_phase_jde;
     use crate::meeus::MeeusEphemeris;
     use crate::time::julian_day;
+
+    /// The conjunction of Meeus lunation `k`, refined against `eph`.
+    fn conjunction(eph: &dyn Ephemeris, k: i64) -> f64 {
+        phase_near_tt(eph, Phase::New, meeus_phase_jde(k as f64))
+    }
 
     #[test]
     fn meeus_47a_48a_row() {

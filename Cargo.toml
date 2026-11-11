@@ -32,7 +32,7 @@ mooncalc-app = { path = "crates/mooncalc-app" }
 # Third-party pins (released >= 14 days before adoption; see AGENTS.md).
 eframe = { version = "=0.37.0", features = ["persistence"] }
 egui = "=0.37.0"
-egui_extras = "=0.37.0"
+egui_extras = { version = "=0.37.0", default-features = false }
 png = "=0.18.1"
 # Native open/save dialogs for the egui app (0.18.0 is younger than 14 days).
 rfd = "=0.17.2"
