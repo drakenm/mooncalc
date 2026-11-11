@@ -5,7 +5,8 @@
 //! 1. [`MapTab::poll`] derives a [`MapSpec`] (local date, evening/morning,
 //!    criterion, resolution, ephemeris) from the settings. When it changes
 //!    (debounced by [`DEBOUNCE`]) a compute job replaces any running one:
-//!    `mooncalc_maps::engine` over every core ([`compute::compute_map`]).
+//!    the shared `mooncalc_app::map::MapJob` with its rows spread over every
+//!    core ([`compute::compute_map`]).
 //! 2. A finished map, or a change of display options only (projection,
 //!    globe centre, layers, view size), starts a cheap render job
 //!    ([`draw::render_view`]); no recomputation.
@@ -14,7 +15,9 @@
 //!
 //! The side panel shows the legend from the criterion's `zones()` with
 //! cell counts, the map facts, the hovered cell, and the earliest-sighting
-//! scan for the lunation ([`compute::compute_earliest`]).
+//! scan for the lunation ([`compute::compute_earliest`], on
+//! `mooncalc_app::earliest::EarliestJob`). The renderer and its options
+//! ([`draw`]: projections, globe, layers, export composition) are egui's.
 
 pub mod compute;
 pub mod draw;
@@ -33,6 +36,7 @@ use crate::jobs::JobSlot;
 use crate::settings::{Crescent, Settings};
 use crate::widgets::map_view::{MapImage, MapView};
 
+use compute::app_crescent;
 pub use compute::{ComputedMap, EarliestResult, EarliestSpec, MapSpec, Resolution};
 pub use draw::{ExportOptions, MapSettings, ProjectionKind};
 
@@ -51,13 +55,6 @@ const PREVIEW_WIDTH: u32 = 720;
 /// every map cell is evaluated on its own evening of this date.
 pub fn map_date(settings: &Settings) -> CalendarDate {
     CalendarDate::from_jd(settings.time.jd_local())
-}
-
-fn app_crescent(c: Crescent) -> mooncalc_app::dto::Crescent {
-    match c {
-        Crescent::Evening => mooncalc_app::dto::Crescent::Evening,
-        Crescent::Morning => mooncalc_app::dto::Crescent::Morning,
-    }
 }
 
 /// When the evening (morning) a map of `date` shows under the observer is
@@ -218,7 +215,9 @@ impl MapTab {
 
     fn submit_compute(&mut self, ctx: &egui::Context, spec: MapSpec, active: &ActiveEphemeris) {
         self.submitted = Some(spec.clone());
-        if let Some(problem) = active.coverage_problem(spec.date.jd0() + 1.0, 3.0) {
+        let jd0 = spec.date.jd0();
+        let (before, after) = mooncalc_app::map::COVERAGE_MARGIN_DAYS;
+        if let Some(problem) = active.span_problem(jd0, jd0 + 1.0, before, after) {
             self.compute.cancel();
             self.error = Some(problem);
             return;
@@ -316,7 +315,16 @@ impl MapTab {
             return;
         }
         self.earliest_submitted = Some(spec.clone());
-        if let Some(problem) = active.coverage_problem(spec.date.jd0() + 15.0, 20.0) {
+        // The scanned evenings lie between the look-back and a lunation
+        // and the scan's length later; each needs a map's coverage.
+        let jd0 = spec.date.jd0();
+        let (before, after) = mooncalc_app::map::COVERAGE_MARGIN_DAYS;
+        if let Some(problem) = active.span_problem(
+            jd0 - compute::EARLIEST_LOOK_BACK_DAYS - 1.0,
+            jd0 + 30.0 + f64::from(compute::EARLIEST_EVENINGS),
+            before,
+            after,
+        ) {
             self.earliest.cancel();
             self.earliest_error = Some(problem);
             return;
@@ -598,18 +606,14 @@ impl MapTab {
                 for (i, z) in map.zones.iter().enumerate() {
                     swatch(ui, z.rgb);
                     ui.add(egui::Label::new(format!("{}: {}", z.code, z.description)).wrap());
-                    let n = map.zone_counts[i];
-                    ui.monospace(format!("{n:>6} {:>5.1}%", 100.0 * n as f64 / total));
+                    let n = map.zone_counts.get(i).copied().unwrap_or(0);
+                    ui.monospace(format!("{n:>6} {:>5.1}%", 100.0 * f64::from(n) / total));
                     ui.end_row();
                 }
-                for (i, &n) in map.status_counts.iter().enumerate() {
-                    if n == 0 {
-                        continue;
-                    }
-                    let status = STATUSES[i];
+                for (status, n) in map.unzoned_counts() {
                     ui.label("");
                     ui.weak(compute::status_text(status, map.spec.crescent));
-                    ui.monospace(format!("{n:>6} {:>5.1}%", 100.0 * n as f64 / total));
+                    ui.monospace(format!("{n:>6} {:>5.1}%", 100.0 * f64::from(n) / total));
                     ui.end_row();
                 }
             });
@@ -678,14 +682,20 @@ impl MapTab {
                     }
                     return;
                 };
-                ui.label(format!("New Moon {}", fmt_instant(r.conjunction.jd_ut, tz)));
-                ui.weak(format!(
-                    "First evening each zone (or better) appears anywhere, scanning {} to {} \
-                     on a {}° grid.",
-                    draw::date_text(r.dates[0]),
-                    draw::date_text(*r.dates.last().unwrap_or(&r.dates[0])),
-                    r.spec.step_deg
+                ui.label(format!(
+                    "New Moon {}",
+                    fmt_instant(r.conjunction().jd_ut, tz)
                 ));
+                let dates: Vec<CalendarDate> = r.dates().collect();
+                if let (Some(first), Some(last)) = (dates.first(), dates.last()) {
+                    ui.weak(format!(
+                        "First evening each zone (or better) appears anywhere, scanning {} to \
+                         {} on a {}° grid.",
+                        draw::date_text(*first),
+                        draw::date_text(*last),
+                        r.spec.step_deg
+                    ));
+                }
                 if running {
                     ui.horizontal(|ui| {
                         ui.spinner();
@@ -698,18 +708,22 @@ impl MapTab {
                     .spacing([6.0, 3.0])
                     .striped(true)
                     .show(ui, |ui| {
-                        for (i, first) in r.first.iter().enumerate() {
-                            let z = &r.zones[i];
+                        for z in &r.scan.zones {
                             ui.horizontal(|ui| {
                                 swatch(ui, z.rgb);
-                                ui.label(z.code).on_hover_text(z.description);
+                                ui.label(&z.code).on_hover_text(&z.description);
                             });
-                            match first {
+                            match &z.first {
                                 Some(f) => {
-                                    ui.monospace(draw::date_text(f.date));
+                                    let date = CalendarDate::from(f.date);
+                                    ui.monospace(draw::date_text(date));
                                     ui.label(fmt_lat_lon_short(f.lat_deg, f.lon_deg))
                                         .on_hover_text(format!(
-                                            "Best cell{}; {} cells reach this zone",
+                                            "Best cell{}{}; {} cells reach this zone",
+                                            f.nearest_city
+                                                .as_ref()
+                                                .map(|c| format!(" near {c}"))
+                                                .unwrap_or_default(),
                                             f.value
                                                 .map(|v| format!(" (value {v:+.3})"))
                                                 .unwrap_or_default(),
@@ -721,7 +735,7 @@ impl MapTab {
                                             .on_hover_text("Show this date's evening map")
                                             .clicked()
                                         {
-                                            jump = Some((f.date, None));
+                                            jump = Some((date, None));
                                         }
                                         if ui
                                             .small_button("📍")
@@ -730,7 +744,7 @@ impl MapTab {
                                             )
                                             .clicked()
                                         {
-                                            jump = Some((f.date, Some((f.lat_deg, f.lon_deg))));
+                                            jump = Some((date, Some((f.lat_deg, f.lon_deg))));
                                         }
                                     });
                                 }
@@ -759,21 +773,6 @@ impl MapTab {
     }
 }
 
-use mooncalc_visibility::circumstances::Status;
-
-/// Every [`Status`], indexed by its discriminant.
-const STATUSES: [Status; compute::STATUS_COUNT] = [
-    Status::Crescent,
-    Status::BeforeConjunction,
-    Status::MoonSetsFirst,
-    Status::MoonAlwaysUp,
-    Status::MoonAlwaysDown,
-    Status::MidnightSun,
-    Status::PolarNight,
-    Status::SunAltitudeNotReached,
-    Status::OutsideEphemeris,
-];
-
 /// A small colour square.
 pub fn swatch(ui: &mut egui::Ui, rgb: [u8; 3]) {
     let (rect, _) = ui.allocate_exact_size(egui::vec2(14.0, 14.0), egui::Sense::hover());
@@ -790,13 +789,6 @@ pub fn swatch(ui: &mut egui::Ui, rgb: [u8; 3]) {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn statuses_are_indexed_by_discriminant() {
-        for (i, s) in STATUSES.iter().enumerate() {
-            assert_eq!(*s as usize, i);
-        }
-    }
 
     /// One headless egui frame of the Map tab.
     fn frame(

@@ -1,21 +1,28 @@
 //! Map computation on worker threads: the visibility grid for one date
-//! ([`compute_map`]) and the earliest-sighting scan ([`compute_earliest`]),
-//! both spread over all cores with [`parallel_rows`].
+//! ([`compute_map`]) and the earliest-sighting scan ([`compute_earliest`]).
+//!
+//! Both use the shared services, `mooncalc_app::map::MapJob` and
+//! `mooncalc_app::earliest::EarliestJob` (validation, the engine context,
+//! assembly, counts, the scan), as the Tauri frontend does. Only the
+//! threading is egui's: rows are spread over all cores with
+//! [`parallel_rows`], one row at a time so cancellation and progress stay
+//! responsive.
 
 use std::time::{Duration, Instant as Clock};
 
+use mooncalc_app::dto::{
+    ApiError, CivilDate, EarliestParams, EarliestResult as EarliestDto, MapParams, MapTiming,
+    StatusCounts,
+};
+use mooncalc_app::earliest::{EarliestJob, next_new_moon};
+use mooncalc_app::map::MapJob;
 use mooncalc_core::Ephemeris;
 use mooncalc_core::events::CalendarDate;
-use mooncalc_core::events::phases::SYNODIC_MONTH_DAYS;
 use mooncalc_core::time::Instant;
-use mooncalc_maps::engine::{
-    EarliestScan, EngineContext, FirstSighting, RowBlock, ValueField, conjunction_near,
-    evaluate_rows, field_thresholds, scan_dates,
-};
+use mooncalc_maps::engine::{RowBlock, ValueField};
 use mooncalc_maps::grid::VisibilityGrid;
 use mooncalc_visibility::ZoneInfo;
-use mooncalc_visibility::circumstances::{Sighting, Status};
-use mooncalc_visibility::criteria::by_id;
+use mooncalc_visibility::circumstances::Status;
 use serde::{Deserialize, Serialize};
 
 use crate::jobs::{JobContext, JobError, parallel_rows};
@@ -58,16 +65,11 @@ impl Resolution {
     }
 }
 
-/// A whole-world grid at `step_deg`.
-pub fn world_grid(step_deg: f64) -> VisibilityGrid {
-    let rows = (180.0 / step_deg).round() as usize;
-    VisibilityGrid::new(-90.0, 90.0, -180.0, 180.0, rows, 2 * rows)
-}
-
-pub fn sighting(c: Crescent) -> Sighting {
+/// The wire form of the crescent setting.
+pub fn app_crescent(c: Crescent) -> mooncalc_app::dto::Crescent {
     match c {
-        Crescent::Evening => Sighting::Evening,
-        Crescent::Morning => Sighting::Morning,
+        Crescent::Evening => mooncalc_app::dto::Crescent::Evening,
+        Crescent::Morning => mooncalc_app::dto::Crescent::Morning,
     }
 }
 
@@ -83,8 +85,20 @@ pub struct MapSpec {
     pub ephemeris: String,
 }
 
-/// Number of [`Status`] variants.
-pub const STATUS_COUNT: usize = Status::ALL.len();
+impl MapSpec {
+    /// The service request: the whole world at the spec's resolution.
+    pub fn params(&self) -> MapParams {
+        MapParams {
+            date: self.date.into(),
+            criterion_id: self.criterion_id.clone(),
+            crescent: app_crescent(self.crescent),
+            resolution_deg: self.resolution.step_deg(),
+            bounds: None,
+            ephemeris_id: None,
+            include_values: false,
+        }
+    }
+}
 
 /// Short description of a cell status without a crescent.
 pub fn status_text(s: Status, crescent: Crescent) -> &'static str {
@@ -112,12 +126,12 @@ pub struct ComputedMap {
     pub zones: &'static [ZoneInfo],
     pub grid: VisibilityGrid,
     pub field: ValueField,
-    /// The new Moon nearest the map's evenings (mornings).
+    /// The new Moon nearest the map's date.
     pub conjunction: Instant,
     /// Cells per zone index.
-    pub zone_counts: Vec<usize>,
-    /// Cells without a zone, per [`Status`] (indexed by `status as usize`).
-    pub status_counts: [usize; STATUS_COUNT],
+    pub zone_counts: Vec<u32>,
+    /// Cells per status; `crescent` counts the cells with a zone.
+    pub status_counts: StatusCounts,
     pub elapsed: Duration,
 }
 
@@ -164,6 +178,43 @@ impl ComputedMap {
     pub fn zone_info(&self, zone: u8) -> Option<&'static ZoneInfo> {
         self.zones.get(zone as usize)
     }
+
+    /// Cells without a zone, per status, where there are any.
+    pub fn unzoned_counts(&self) -> impl Iterator<Item = (Status, u32)> + '_ {
+        self.status_counts
+            .by_status()
+            .into_iter()
+            .filter(|&(s, n)| s != Status::Crescent && n > 0)
+    }
+}
+
+fn api_error(e: ApiError) -> JobError {
+    if e.code == "cancelled" {
+        JobError::Cancelled
+    } else {
+        JobError::Failed(e.message)
+    }
+}
+
+/// Evaluate rows `0..rows` of the given jobs on all cores, one row per work
+/// item: item `i` is row `i % rows` of `jobs[i / rows]`. Returns each job's
+/// blocks in order.
+fn evaluate_parallel(jobs: &[MapJob], job: &JobContext) -> Result<Vec<Vec<RowBlock>>, JobError> {
+    let Some(rows) = jobs.first().map(MapJob::rows) else {
+        return Ok(Vec::new());
+    };
+    let blocks = parallel_rows(job, rows * jobs.len(), |i| {
+        let row = i % rows;
+        jobs[i / rows]
+            .evaluate_rows_with(row..row + 1, |_, _| !job.is_cancelled())
+            .map_err(api_error)
+    })?;
+    let mut blocks = blocks.into_iter();
+    let mut out = Vec::with_capacity(jobs.len());
+    for _ in jobs {
+        out.push(blocks.by_ref().take(rows).collect::<Result<Vec<_>, _>>()?);
+    }
+    Ok(out)
 }
 
 /// Compute the map for `spec` on all cores.
@@ -173,57 +224,22 @@ pub fn compute_map(
     job: &JobContext,
 ) -> Result<ComputedMap, JobError> {
     let started = Clock::now();
-    let criterion = by_id(&spec.criterion_id)
-        .ok_or_else(|| JobError::Failed(format!("unknown criterion {:?}", spec.criterion_id)))?;
-    let template = world_grid(spec.resolution.step_deg());
-    let ctx = EngineContext::new(
-        eph,
-        criterion.as_ref(),
-        &template,
-        spec.date,
-        sighting(spec.crescent),
-    );
+    let map_job = MapJob::prepare(eph, &spec.params()).map_err(api_error)?;
     job.checkpoint()?;
-    let blocks = parallel_rows(job, ctx.rows(), |row| eval_row(&ctx, row, job))?;
-    let mut grid = template;
-    let mut field = ValueField::new(grid.rows, grid.cols, field_thresholds(criterion.as_ref()));
-    for block in blocks {
-        let block = block?;
-        grid.apply_rows(&block);
-        field.apply_rows(&block);
-    }
-
-    let zones = criterion.zones();
-    let mut zone_counts = vec![0; zones.len()];
-    let mut status_counts = [0; STATUS_COUNT];
-    for (z, s) in grid.cells.iter().zip(&field.status) {
-        match z {
-            Some(z) if (*z as usize) < zones.len() => zone_counts[*z as usize] += 1,
-            _ => status_counts[*s as usize] += 1,
-        }
-    }
-    let mid = spec.date.jd0() + 1.0;
-    let conjunction = ctx
-        .new_moons()
-        .iter()
-        .copied()
-        .min_by(|a, b| (a.jd_ut - mid).abs().total_cmp(&(b.jd_ut - mid).abs()))
-        .unwrap_or_else(|| Instant::from_jd_ut(mid));
+    let blocks = evaluate_parallel(std::slice::from_ref(&map_job), job)?;
+    let out = map_job.assemble(blocks.into_iter().flatten());
+    let criterion = map_job.criterion();
     Ok(ComputedMap {
         criterion_name: criterion.name().to_owned(),
-        zones,
-        grid,
-        field,
-        conjunction,
-        zone_counts,
-        status_counts,
+        zones: criterion.zones(),
+        zone_counts: out.zone_counts(),
+        status_counts: out.status_counts(),
+        conjunction: out.conjunction,
+        grid: out.grid,
+        field: out.field,
         elapsed: started.elapsed(),
         spec,
     })
-}
-
-fn eval_row(ctx: &EngineContext<'_>, row: usize, job: &JobContext) -> Result<RowBlock, JobError> {
-    evaluate_rows(ctx, row..row + 1, |_, _| !job.is_cancelled()).map_err(|_| JobError::Cancelled)
 }
 
 /// What the earliest-sighting scan depends on.
@@ -239,65 +255,59 @@ pub struct EarliestSpec {
 /// Evenings scanned after the conjunction (the scan starts the day before).
 pub const EARLIEST_EVENINGS: u32 = 4;
 
+/// Days before the spec's date from which the next new Moon is scanned.
+pub const EARLIEST_LOOK_BACK_DAYS: f64 = 3.0;
+
 /// Result of the earliest-sighting scan.
 #[derive(Clone, Debug)]
 pub struct EarliestResult {
     pub spec: EarliestSpec,
-    pub conjunction: Instant,
-    pub zones: &'static [ZoneInfo],
-    pub dates: Vec<CalendarDate>,
-    /// Per zone (except the last, "not visible"), the first sighting.
-    pub first: Vec<Option<FirstSighting>>,
+    /// The service result: the conjunction, the dates scanned and, per zone
+    /// (except the last, "not visible"), the first sighting.
+    pub scan: EarliestDto,
 }
 
-/// The first new Moon at or after `jd_ut`.
-pub fn next_new_moon(eph: &dyn Ephemeris, jd_ut: f64) -> Instant {
-    let c = conjunction_near(eph, Instant::from_jd_ut(jd_ut + 0.5 * SYNODIC_MONTH_DAYS));
-    if c.jd_ut < jd_ut {
-        conjunction_near(eph, c.add_days(SYNODIC_MONTH_DAYS))
-    } else {
-        c
+impl EarliestResult {
+    pub fn conjunction(&self) -> Instant {
+        self.scan.conjunction.to_instant()
+    }
+
+    pub fn dates(&self) -> impl Iterator<Item = CalendarDate> + '_ {
+        self.scan.dates_scanned.iter().map(|&d| d.into())
     }
 }
 
-/// Run the earliest-sighting scan (evening crescent) for the lunation
-/// starting near `spec.date`, evaluating every evening's rows in parallel.
+/// Run the earliest-sighting scan (evening crescent) for the first new
+/// Moon after `spec.date` minus [`EARLIEST_LOOK_BACK_DAYS`], evaluating
+/// every evening's rows in parallel.
 pub fn compute_earliest(
     spec: EarliestSpec,
     eph: &dyn Ephemeris,
     job: &JobContext,
 ) -> Result<EarliestResult, JobError> {
-    let criterion = by_id(&spec.criterion_id)
-        .ok_or_else(|| JobError::Failed(format!("unknown criterion {:?}", spec.criterion_id)))?;
-    let conjunction = next_new_moon(eph, spec.date.jd0() - 3.0);
-    let dates = scan_dates(conjunction, EARLIEST_EVENINGS);
-    let template = world_grid(spec.step_deg);
-    let contexts: Vec<EngineContext<'_>> = dates
+    let conjunction = next_new_moon(eph, spec.date.jd0() - EARLIEST_LOOK_BACK_DAYS);
+    let params = EarliestParams {
+        date: CivilDate::from(spec.date),
+        criterion_id: spec.criterion_id.clone(),
+        resolution_deg: Some(spec.step_deg),
+        evenings: Some(EARLIEST_EVENINGS),
+        ephemeris_id: None,
+    };
+    let mut scan = EarliestJob::with_conjunction(&params, conjunction).map_err(api_error)?;
+    let maps = scan
+        .dates()
         .iter()
-        .map(|&d| EngineContext::new(eph, criterion.as_ref(), &template, d, Sighting::Evening))
-        .collect();
-    let rows = template.rows;
-    let blocks = parallel_rows(job, rows * dates.len(), |i| {
-        eval_row(&contexts[i / rows], i % rows, job)
-    })?;
-    let mut scan = EarliestScan::new(criterion.as_ref());
-    let mut blocks = blocks.into_iter();
-    for &date in &dates {
-        let mut grid = template.clone();
-        let mut field = ValueField::new(grid.rows, grid.cols, None);
-        for block in blocks.by_ref().take(rows) {
-            let block = block?;
-            grid.apply_rows(&block);
-            field.apply_rows(&block);
-        }
-        scan.accumulate(date, &grid, &field);
+        .map(|&d| MapJob::prepare(eph, &scan.map_params(d)))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(api_error)?;
+    job.checkpoint()?;
+    let blocks = evaluate_parallel(&maps, job)?;
+    for (map, blocks) in maps.iter().zip(blocks) {
+        scan.accumulate(&map.assemble(blocks));
     }
     Ok(EarliestResult {
         spec,
-        conjunction,
-        zones: criterion.zones(),
-        dates,
-        first: scan.results().to_vec(),
+        scan: scan.result(MapTiming::default()),
     })
 }
 
@@ -322,8 +332,12 @@ mod tests {
         let map = compute_map(spec(Resolution::Deg2), &eph, &JobContext::detached()).unwrap();
         assert_eq!(map.cells(), 90 * 180);
         assert_eq!(
-            map.zone_counts.iter().sum::<usize>() + map.status_counts.iter().sum::<usize>(),
-            map.cells()
+            map.zone_counts.iter().sum::<u32>() + map.unzoned_counts().map(|(_, n)| n).sum::<u32>(),
+            map.cells() as u32
+        );
+        assert_eq!(
+            map.zone_counts.iter().sum::<u32>(),
+            map.status_counts.crescent
         );
         // Conjunction 2024-03-10 09:00 UT.
         let c = map.conjunction.to_calendar();
@@ -340,6 +354,18 @@ mod tests {
         );
         let asia = map.cell_at(15.0, 100.0).unwrap();
         assert!(asia.zone.is_none_or(|z| z >= 4), "{asia:?}");
+    }
+
+    /// The threaded rows give the same map as the service on one thread.
+    #[test]
+    fn parallel_rows_match_the_service() {
+        let eph = MeeusEphemeris::new();
+        let s = spec(Resolution::Deg2);
+        let map = compute_map(s.clone(), &eph, &JobContext::detached()).unwrap();
+        let serial = MapJob::prepare(&eph, &s.params()).unwrap().evaluate();
+        assert_eq!(map.grid, serial.grid);
+        assert_eq!(map.field.status, serial.field.status);
+        assert_eq!(map.status_counts, serial.status_counts());
     }
 
     #[test]
@@ -367,18 +393,23 @@ mod tests {
             &JobContext::detached(),
         )
         .unwrap();
-        assert_eq!(r.first.len(), 5);
-        let a = r.first[0].unwrap();
-        assert_eq!(a.date, CalendarDate::new(2024, 3, 10));
+        assert_eq!(r.scan.zones.len(), 5);
+        let a = r.scan.zones[0].first.as_ref().unwrap();
+        assert_eq!(CalendarDate::from(a.date), CalendarDate::new(2024, 3, 10));
         assert!(a.lon_deg < -30.0, "{a:?}");
-    }
-
-    #[test]
-    fn next_new_moon_is_at_or_after() {
-        let eph = MeeusEphemeris::new();
-        let t = CalendarDate::new(2024, 3, 11).jd0();
-        let c = next_new_moon(&eph, t);
-        assert!(c.jd_ut >= t && c.jd_ut < t + SYNODIC_MONTH_DAYS);
-        assert_eq!(c.to_calendar().month, 4); // 2024-04-08
+        let dates: Vec<_> = r.dates().collect();
+        assert_eq!(dates.len(), EARLIEST_EVENINGS as usize);
+        assert_eq!(dates[0], CalendarDate::new(2024, 3, 9));
+        // A few days after the new Moon the scan still covers it.
+        let later = compute_earliest(
+            EarliestSpec {
+                date: CalendarDate::new(2024, 3, 12),
+                ..r.spec.clone()
+            },
+            &eph,
+            &JobContext::detached(),
+        )
+        .unwrap();
+        assert_eq!(later.conjunction(), r.conjunction());
     }
 }

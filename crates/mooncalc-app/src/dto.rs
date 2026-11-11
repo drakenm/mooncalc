@@ -662,11 +662,21 @@ pub struct CrescentReport {
     pub moon_event: Option<UtDateTime>,
     /// Yallop's best time, sunset + 4/9 lag (sunrise − 4/9 lag).
     pub best_time: Option<UtDateTime>,
-    /// The geocentric new Moon nearest the best time.
+    /// The geocentric new Moon nearest the instant of `geometry` (nearest
+    /// local civil noon when there is no geometry).
     pub conjunction: Option<UtDateTime>,
     /// Circumstances at the best time (at the Sun event when the Moon sets
-    /// first).
+    /// first, or when the best time is undefined because the Moon does not
+    /// set or rise near the Sun event, see `geometry_at_sun_event`).
     pub geometry: Option<CrescentGeometryDto>,
+    /// The instant of `geometry`.
+    #[serde(default)]
+    pub geometry_at: Option<UtDateTime>,
+    /// Whether `geometry` is at the Sun event because Yallop's best time is
+    /// undefined (status `moon-always-up`): the circumstances the sunset
+    /// criteria are evaluated at.
+    #[serde(default)]
+    pub geometry_at_sun_event: bool,
     /// Every criterion, in display order, each at its own evaluation time.
     pub criteria: Vec<CriterionVerdict>,
 }

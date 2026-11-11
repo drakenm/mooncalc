@@ -282,8 +282,14 @@ export interface CrescentReport {
   sunEvent: UtDateTime | null;
   moonEvent: UtDateTime | null;
   bestTime: UtDateTime | null;
+  /** New Moon nearest the geometry's instant (nearest local noon without geometry). */
   conjunction: UtDateTime | null;
+  /** At the best time, or at the Sun event when the Moon sets first or the best time is undefined. */
   geometry: CrescentGeometry | null;
+  /** The instant of `geometry`. */
+  geometryAt: UtDateTime | null;
+  /** `geometry` is at the Sun event because the best time is undefined (moon-always-up). */
+  geometryAtSunEvent: boolean;
   criteria: CriterionVerdict[];
 }
 

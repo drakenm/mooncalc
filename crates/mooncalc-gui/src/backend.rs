@@ -163,7 +163,8 @@ impl ActiveEphemeris {
         let coverage = self.coverage_text();
         Some(if start >= a && end <= b {
             format!(
-                "{what} is too close to the edge of the {backend} coverage ({coverage}): this                  view needs ephemeris data from {} to {}",
+                "{what} is too close to the edge of the {backend} coverage ({coverage}): this \
+                 view needs ephemeris data from {} to {}",
                 format_jd_date(start - before),
                 format_jd_date(end + after)
             )
@@ -391,6 +392,7 @@ mod tests {
         let edge = 2_451_900.5; // 2000-12-22
         let msg = a.span_problem(edge, edge, 31.0, 31.0).unwrap();
         assert!(msg.contains("too close to the edge"), "{msg}");
+        assert!(msg.contains("this view needs"), "{msg}");
         assert!(msg.contains("2000-12-22"), "{msg}");
         let outside = 2_452_000.5; // 2001-04-01
         let msg = a.span_problem(outside, outside, 0.0, 0.0).unwrap();

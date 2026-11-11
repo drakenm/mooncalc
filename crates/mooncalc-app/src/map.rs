@@ -46,6 +46,11 @@ pub const RESOLUTION_RANGE_DEG: (f64, f64) = (0.1, 10.0);
 /// Largest accepted number of cells (the 0.1° world grid).
 pub const MAX_CELLS: usize = 1800 * 3600;
 
+/// Ephemeris coverage a map needs before and after 0h UT of its date, days:
+/// the engine tabulates from one day before to three days after, and phase
+/// searches reach a lunation further either side.
+pub const COVERAGE_MARGIN_DAYS: (f64, f64) = (32.0, 34.0);
+
 /// Rows per block that keeps per-block overhead negligible while giving
 /// threads enough blocks to balance (a 0.25° world grid has 720 rows).
 pub const DEFAULT_ROW_CHUNK: usize = 8;
@@ -140,10 +145,9 @@ impl MapJob {
         }
         let template = grid_for(params)?;
         let date = CalendarDate::from(params.date);
-        // The engine tabulates from one day before to three days after 0h
-        // UT, and phase searches reach a lunation further either side.
         let jd0 = Instant::from_jd_ut(date.jd0()).jd_tt();
-        check_covers(eph, jd0 - 32.0, jd0 + 34.0)?;
+        let (before, after) = COVERAGE_MARGIN_DAYS;
+        check_covers(eph, jd0 - before, jd0 + after)?;
         let ctx = EngineContext::new(
             eph,
             criterion,
@@ -253,6 +257,25 @@ impl std::fmt::Debug for MapOutput {
     }
 }
 
+impl StatusCounts {
+    /// Each count with its status. `crescent` counts every cell with a zone
+    /// (Moon-always-up cells the criterion was applied to included), the
+    /// others cells without one.
+    pub fn by_status(&self) -> [(Status, u32); Status::ALL.len()] {
+        [
+            (Status::Crescent, self.crescent),
+            (Status::BeforeConjunction, self.before_conjunction),
+            (Status::MoonSetsFirst, self.moon_sets_first),
+            (Status::MoonAlwaysUp, self.moon_always_up),
+            (Status::MoonAlwaysDown, self.moon_always_down),
+            (Status::MidnightSun, self.midnight_sun),
+            (Status::PolarNight, self.polar_night),
+            (Status::SunAltitudeNotReached, self.sun_altitude_not_reached),
+            (Status::OutsideEphemeris, self.outside_ephemeris),
+        ]
+    }
+}
+
 fn status_counts(status: &[Status], zones: &[Option<u8>]) -> StatusCounts {
     let mut s = StatusCounts::default();
     for (st, z) in status.iter().zip(zones) {
@@ -339,19 +362,25 @@ fn best_cell(grid: &VisibilityGrid, field: &ValueField) -> Option<BestCell> {
     })
 }
 
-/// Replace characters the built-in 5×7 font lacks.
-fn ascii_label(s: &str) -> String {
+/// Replace characters the built-in 5×7 font of `mooncalc_maps::render`
+/// lacks (printable ASCII and `°` are kept), for legends and titles.
+pub fn ascii_label(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {
         match c {
+            ' '..='~' | '°' => out.push(c),
             '≥' => out.push_str(">="),
             '≤' => out.push_str("<="),
-            '′' | '’' => out.push('\''),
-            '″' => out.push('"'),
-            '−' | '–' | '—' => out.push('-'),
+            '′' | '’' | '‘' => out.push('\''),
+            '″' | '“' | '”' => out.push('"'),
+            '–' | '—' | '−' => out.push('-'),
             '×' => out.push('x'),
-            '°' => out.push('°'),
-            c if c.is_ascii() => out.push(c),
+            '·' => out.push('-'),
+            'á' | 'à' | 'â' | 'ä' => out.push('a'),
+            'é' | 'è' | 'ê' => out.push('e'),
+            'ö' | 'ó' => out.push('o'),
+            'ü' | 'ú' => out.push('u'),
+            'ç' => out.push('c'),
             _ => out.push('?'),
         }
     }
@@ -359,6 +388,22 @@ fn ascii_label(s: &str) -> String {
 }
 
 impl MapOutput {
+    /// Cells per zone index.
+    pub fn zone_counts(&self) -> Vec<u32> {
+        let mut counts = vec![0u32; self.criterion.zones().len()];
+        for z in self.grid.cells.iter().flatten() {
+            if let Some(n) = counts.get_mut(usize::from(*z)) {
+                *n += 1;
+            }
+        }
+        counts
+    }
+
+    /// Cells per status (see [`StatusCounts::by_status`]).
+    pub fn status_counts(&self) -> StatusCounts {
+        status_counts(&self.field.status, &self.grid.cells)
+    }
+
     /// The wire result.
     pub fn result(&self, ephemeris_name: &str, timing: MapTiming) -> MapResult {
         let c = self.criterion;
@@ -369,12 +414,7 @@ impl MapOutput {
             .iter()
             .map(|z| z.unwrap_or(NO_DATA))
             .collect();
-        let mut zone_counts = vec![0u32; zones.len()];
-        for z in self.grid.cells.iter().flatten() {
-            if let Some(n) = zone_counts.get_mut(usize::from(*z)) {
-                *n += 1;
-            }
-        }
+        let zone_counts = self.zone_counts();
         MapResult {
             criterion_id: c.id().into(),
             criterion_name: c.name().into(),
@@ -398,7 +438,7 @@ impl MapOutput {
             },
             thresholds: self.field.thresholds.clone(),
             zone_counts,
-            status_counts: status_counts(&self.field.status, &self.grid.cells),
+            status_counts: self.status_counts(),
             conjunction: self.conjunction.into(),
             evaluation_time: criteria::evaluation_time_text(c.evaluation_time()),
             date_convention: crate::dateline::map_convention(
@@ -711,5 +751,25 @@ mod tests {
     #[test]
     fn ascii_labels() {
         assert_eq!(ascii_label("ARCL ≥ 12° − W′"), "ARCL >= 12° - W'");
+        assert_eq!(
+            ascii_label("Easily visible (ARCL ≥ 12°) — W′"),
+            "Easily visible (ARCL >= 12°) - W'"
+        );
+        assert_eq!(ascii_label("Ürümqi · Bogotá"), "?rumqi - Bogota");
+        assert_eq!(ascii_label("日"), "?");
+    }
+
+    #[test]
+    fn counts_by_status_cover_every_cell() {
+        let eph = meeus(false);
+        let job = MapJob::prepare(&*eph, &params(10.0)).unwrap();
+        let out = job.evaluate();
+        let by = out.status_counts().by_status();
+        assert_eq!(
+            by.iter().map(|(s, _)| *s).collect::<Vec<_>>(),
+            Status::ALL.to_vec()
+        );
+        assert_eq!(by.iter().map(|(_, n)| n).sum::<u32>(), 18 * 36);
+        assert_eq!(out.zone_counts().iter().sum::<u32>(), by[0].1);
     }
 }

@@ -38,6 +38,10 @@ use crate::dto::{
 use crate::ephemeris::check_covers;
 use crate::validate;
 
+/// Ephemeris coverage a report needs either side of civil noon, days: the
+/// nearest new Moon and one lunation either side are searched.
+pub const COVERAGE_MARGIN_DAYS: f64 = 32.0;
+
 /// Kebab-case status code.
 pub fn status_code(s: Status) -> &'static str {
     match s {
@@ -51,6 +55,14 @@ pub fn status_code(s: Status) -> &'static str {
         Status::SunAltitudeNotReached => "sun-altitude-not-reached",
         Status::OutsideEphemeris => "outside-ephemeris",
     }
+}
+
+/// The status for a code of [`status_code`].
+pub fn status_from_code(code: &str) -> Option<Status> {
+    Status::ALL
+        .iter()
+        .copied()
+        .find(|&s| status_code(s) == code)
 }
 
 pub(crate) fn status_text(s: Status, crescent: Crescent) -> String {
@@ -143,6 +155,7 @@ fn verdict(c: &dyn Criterion, o: &Outcome) -> CriterionVerdict {
 fn crescent_report<S: PositionSource + ?Sized>(
     cache: &mut OutcomeCache<'_, S>,
     crescent: Crescent,
+    nearest_new_moon: Instant,
 ) -> CrescentReport {
     let main = cache.get(EvaluationTime::YallopBestTime);
     let sun_event = match main {
@@ -151,7 +164,16 @@ fn crescent_report<S: PositionSource + ?Sized>(
         | Outcome::SunAltitudeNotReached { sun_event } => Some(sun_event),
         _ => main.circumstances().map(|c| c.sun_event),
     };
-    let circ = main.circumstances();
+    // Yallop's best time is undefined when the Moon does not set (rise)
+    // near the Sun event; the circumstances at the Sun event, which the
+    // sunset criteria use, are tabulated instead.
+    let (circ, at_sun_event) = match main.circumstances() {
+        Some(c) => (Some(*c), false),
+        None => {
+            let c = cache.get(EvaluationTime::Sunset).circumstances().copied();
+            (c, c.is_some())
+        }
+    };
     let best_time = match main {
         Outcome::Crescent(c) | Outcome::BeforeConjunction(c) => Some(ut(c.evaluation)),
         _ => None,
@@ -170,8 +192,10 @@ fn crescent_report<S: PositionSource + ?Sized>(
         sun_event: sun_event.map(ut),
         moon_event: circ.and_then(|c| c.moon_event).map(ut),
         best_time,
-        conjunction: circ.map(|c| ut(c.conjunction)),
+        conjunction: Some(ut(circ.map_or(nearest_new_moon, |c| c.conjunction))),
         geometry: circ.map(|c| CrescentGeometryDto::from(&c.geometry)),
+        geometry_at: circ.map(|c| ut(c.evaluation)),
+        geometry_at_sun_event: at_sun_event,
         criteria,
     }
 }
@@ -186,7 +210,11 @@ pub fn location_report(
     validate::tz_offset(p.tz_offset_hours)?;
     let date = CalendarDate::from(p.date);
     let noon = Instant::from_jd_ut(date.jd0() + 0.5 - p.tz_offset_hours / 24.0);
-    check_covers(eph, noon.jd_tt() - 32.0, noon.jd_tt() + 32.0)?;
+    check_covers(
+        eph,
+        noon.jd_tt() - COVERAGE_MARGIN_DAYS,
+        noon.jd_tt() + COVERAGE_MARGIN_DAYS,
+    )?;
 
     let location = GeoLocation::from(p.location);
     let table = ApparentTable::with_default_step(eph, noon.add_days(-2.5), noon.add_days(2.5));
@@ -233,8 +261,8 @@ pub fn location_report(
         settings,
         done: Vec::new(),
     };
-    let evening = crescent_report(&mut cache(Sighting::Evening), Crescent::Evening);
-    let morning = crescent_report(&mut cache(Sighting::Morning), Crescent::Morning);
+    let evening = crescent_report(&mut cache(Sighting::Evening), Crescent::Evening, *conj);
+    let morning = crescent_report(&mut cache(Sighting::Morning), Crescent::Morning, *conj);
 
     Ok(LocationReport {
         location: p.location,
@@ -404,6 +432,9 @@ mod tests {
         assert!((50.0..70.0).contains(&g.lag_minutes.unwrap()));
         let y = e.criteria[0].verdict.as_ref().unwrap();
         assert_eq!(y.code, "A");
+        // The geometry is at the best time.
+        assert!(!e.geometry_at_sun_event);
+        assert_eq!(e.geometry_at, e.best_time);
         // Every criterion is present and the evening day events exist.
         assert!(
             e.criteria
@@ -420,6 +451,48 @@ mod tests {
         assert_ne!(r.morning.status, "crescent");
         assert!(r.morning.criteria.iter().all(|c| c.verdict.is_none()));
         assert!(r.moon_age_at_noon_hours > 0.0 && r.illumination_at_noon < 0.05);
+    }
+
+    /// Tromsø, 2025-04-01: the young Moon does not set near sunset, so the
+    /// best time is undefined; the geometry is the one at sunset (where the
+    /// sunset criteria give verdicts), and the conjunction is still given.
+    #[test]
+    fn moon_always_up_falls_back_to_sunset() {
+        let eph = meeus(false);
+        let r = location_report(
+            &*eph,
+            &LocationReportParams {
+                date: CivilDate {
+                    year: 2025,
+                    month: 4,
+                    day: 1,
+                },
+                tz_offset_hours: 2.0,
+                location: Location {
+                    lat_deg: 69.65,
+                    lon_deg: 18.96,
+                    elevation_m: 0.0,
+                },
+                ephemeris_id: None,
+            },
+        )
+        .unwrap();
+        let e = &r.evening;
+        assert_eq!(e.status, "moon-always-up");
+        assert!(e.best_time.is_none() && e.moon_event.is_none());
+        assert!(e.geometry_at_sun_event);
+        let at = e.geometry_at.unwrap().to_instant().jd_ut;
+        assert!((at - e.sun_event.unwrap().to_instant().jd_ut).abs() * 1440.0 < 0.01);
+        let g = e.geometry.unwrap();
+        assert!(g.lag_minutes.is_none() && g.moon_alt_deg > 20.0, "{g:?}");
+        assert_eq!(e.conjunction.unwrap().day, 29);
+        let saao = e
+            .criteria
+            .iter()
+            .find(|c| c.criterion_id == "saao")
+            .unwrap();
+        assert!(saao.verdict.is_some());
+        assert_eq!(status_from_code(&e.status), Some(Status::MoonAlwaysUp));
     }
 
     #[test]
@@ -442,6 +515,9 @@ mod tests {
         let r = location_report(&*eph, &p).unwrap();
         assert_eq!(r.evening.status, "midnight-sun");
         assert!(r.evening.sun_event.is_none() && r.day.sunset.is_none());
+        // No circumstances, but the nearest new Moon (2026-06-15).
+        assert!(r.evening.geometry.is_none() && r.evening.geometry_at.is_none());
+        assert_eq!(r.evening.conjunction.unwrap().day, 15);
         p.location.lat_deg = 91.0;
         assert!(location_report(&*eph, &p).is_err());
         p.location.lat_deg = 0.0;
