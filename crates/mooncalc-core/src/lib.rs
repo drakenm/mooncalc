@@ -10,11 +10,32 @@
 //!   take TT/TDB Julian Days (`jd_tt`); convert with [`Instant::jd_tt`].
 //! * Distances are kilometres.
 
+//!
+//! # Modules
+//!
+//! * [`time`] — Julian Day ↔ calendar, sidereal time; [`deltat`] — ΔT.
+//! * [`nutation`], [`precession`] — IAU 1980 nutation, obliquity, IAU 1976
+//!   and IAU 2006 precession, as angles and rotation matrices ([`matrix`]).
+//! * [`transform`] — ecliptic ↔ equatorial ↔ horizontal.
+//! * [`topocentric`] — observer position, parallax, semi-diameters.
+//! * [`refraction`] — Bennett and Sæmundsson refraction.
+//! * [`illumination`] — elongation, phase angle, illuminated fraction,
+//!   bright-limb position angle.
+//! * [`meeus`] — the default [`Ephemeris`]: VSOP87D Sun and ELP-2000/82 Moon.
+//!
+//! The crate has no dependencies and no I/O, threads or clocks in its
+//! default paths, so it builds for `wasm32-unknown-unknown`.
+
 pub mod angle;
 pub mod coords;
+pub mod deltat;
 pub mod ephemeris;
+pub mod matrix;
+pub mod nutation;
+pub mod precession;
 pub mod time;
 
 pub use coords::{Ecliptic, Equatorial, GeoLocation, Horizontal};
 pub use ephemeris::Ephemeris;
-pub use time::{CalendarDateTime, Instant};
+pub use nutation::NutationObliquity;
+pub use time::{CalendarDateTime, Instant, Weekday};
