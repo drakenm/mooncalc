@@ -6,7 +6,7 @@ MoonCalc-rs is a Rust rewrite of Dr. Monzur Ahmed's MoonCalc 6.0, a closed-sourc
 
 | Crate | Role |
 | --- | --- |
-| `mooncalc-core` | Time scales (JD, ΔT, sidereal time), precession/nutation, frame transforms, topocentric parallax, refraction, the `Ephemeris` trait and the default Meeus/ELP backend. Later: rise/set/transit, phases, conjunctions, apogee/perigee, eclipses, libration. |
+| `mooncalc-core` | Time scales (JD, ΔT, sidereal time), precession/nutation, frame transforms, topocentric parallax, refraction, the `Ephemeris` trait and the default Meeus/ELP backend. `events` (rise/set/transit, twilight, phases), `seasons`, `apsides`, `nodes`, `libration`, `eclipses` (Meeus ch. 54 plus Besselian-element refinement and local circumstances) and `tables` (ephemeris table rows). |
 | `mooncalc-visibility` | `CrescentGeometry` (ARCL, ARCV, DAZ, W, lag, age ...), its computation from an ephemeris at the right evaluation time, and every sighting criterion as a pure function. |
 | `mooncalc-maps` | Visibility grid evaluation, projections, embedded Natural Earth base map, raster (egui texture / PNG) and SVG rendering. |
 | `mooncalc-hijri` | Tabular Islamic calendars, Umm al-Qura, and visibility-based calendars (fed month starts by the visibility engine). |

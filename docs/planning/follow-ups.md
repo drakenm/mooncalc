@@ -19,5 +19,9 @@ GitHub issues can't be filed from this environment yet: the `gh` CLI is authenti
 | core | ΔT beyond 2026.75 is an extrapolation; refresh the observed table from IERS periodically. | core validation |
 | gui | Arabic month names need a bundled Arabic font plus text shaping in egui. | gui calendar |
 | tauri | The mock backend duplicates the Rust stubs, and the fallback legend colours may differ from the criteria colours. Both resolve when `mooncalc-app` lands. | tauri-shell |
+| core | Meeus ch. 52 maximum declinations drift up to about 40 min and 100″ in some years; prefer the refined values (documented in `nodes.rs`). | lunar events |
+| core | Two missing marginal penumbral lunar eclipses (2027-07-18, 2096-06-06, \|γ\| ≈ 1.575) are beyond the Meeus ch. 54 limits. | lunar events |
+| visibility | `MoonAlwaysUp` cells aren't evaluated with Yallop's best time; the earliest-sighting scan is evening-only. | circumstances |
+| fixtures | Eclipse tests use `include_str!` paths into the workspace `tests/fixtures/`, which breaks standalone packaging of `mooncalc-core`. | lunar events |
 | fixtures | Odeh Table VI is missing 159 naked-eye rows (V > 8.18). ICOP records weren't extractable. | validation |
 | licensing | Confirm that committing the Yallop (Crown copyright) and Odeh (Springer) tables as test data is acceptable before the repository goes public. | validation |
