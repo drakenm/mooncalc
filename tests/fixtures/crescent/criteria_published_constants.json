@@ -1,0 +1,58 @@
+{
+  "_about": "Criterion constants transcribed from the published papers, for cross-checking crate constants. Angles in degrees, crescent width W in arcminutes. See docs/validation.md.",
+  "yallop_1997": {
+    "source": "Yallop, B.D. (1997), NAO Technical Note No. 69, 'A Method for Predicting the First Sighting of the New Crescent Moon', eqs (3.1)-(3.10), (4.1), (6.1) and Table 5. PDF: https://www.astronomycenter.net/pdf/yallop_1997.pdf",
+    "q_definition": "q = (ARCV - (11.8371 - 6.3226*W' + 0.7319*W'^2 - 0.1018*W'^3)) / 10",
+    "q_polynomial_coefficients_w0_to_w3": [11.8371, -6.3226, 0.7319, -0.1018],
+    "q_scale": 10.0,
+    "width": "SD = 0.27245 * parallax (eq 3.8 with column 14 note); SD' = SD * (1 + sin(h) * sin(parallax)) (eq 3.9, h = geocentric lunar altitude); W' = SD' * (1 - cos ARCL) (eq 3.10)",
+    "best_time": "Tb = Ts + (4/9) * Lag (eq 4.1), Ts = sunset, Lag = moonset - sunset",
+    "arcl_relation": "cos ARCL = cos ARCV * cos DAZ (eq 2.1)",
+    "categories": [
+      {"code": "A", "q_lower_exclusive": 0.216, "text": "Easily visible (ARCL >= 12 deg)", "vis_code": "V"},
+      {"code": "B", "q_lower_exclusive": -0.014, "q_upper_inclusive": 0.216, "text": "Visible under perfect conditions", "vis_code": "V(V)"},
+      {"code": "C", "q_lower_exclusive": -0.160, "q_upper_inclusive": -0.014, "text": "May need optical aid to find crescent", "vis_code": "V(F)"},
+      {"code": "D", "q_lower_exclusive": -0.232, "q_upper_inclusive": -0.160, "text": "Will need optical aid to find crescent", "vis_code": "I(V)"},
+      {"code": "E", "q_lower_exclusive": -0.293, "q_upper_inclusive": -0.232, "text": "Not visible with a telescope, ARCL <= 8.5 deg", "vis_code": "I(I)"},
+      {"code": "F", "q_upper_inclusive": -0.293, "text": "Not visible, below Danjon limit, ARCL <= 8 deg", "vis_code": "I"}
+    ],
+    "category_A_note": "Yallop derives the A/B limit (+0.216) from ARCL = 12, DAZ = 0 using the geocentric constant-semidiameter width W of eq (3.4), not W'.",
+    "historical_criteria": {
+      "maunder_table1": {"DAZ": [0, 5, 10, 15, 20], "ARCV": [11.0, 10.5, 9.5, 8.0, 6.0]},
+      "indian_table2": {"DAZ": [0, 5, 10, 15, 20], "ARCV": [10.4, 10.0, 9.3, 8.0, 6.2]},
+      "bruin_table3": {"W": [0.3, 0.5, 0.7, 1.0, 2.0, 3.0], "ARCV": [10.0, 8.4, 7.5, 6.4, 4.7, 4.3]},
+      "eq_3_1_maunder": "ARCV > 11 - |DAZ|/20 - DAZ^2/100",
+      "eq_3_2_indian": "ARCV > 10.3743 - 0.0137*|DAZ| - 0.0097*DAZ^2",
+      "eq_3_3_bruin": "ARCV > 12.4023 - 9.4878*W + 3.9512*W^2 - 0.5632*W^3",
+      "eq_3_4_bruin_width": "W = 15 * (1 - cos ARCL) = 15 * (1 - cos ARCV * cos DAZ)",
+      "eq_3_5_maunder_in_W": "ARCV > 13.1783 - 9.0812*W + 2.0709*W^2 - 0.3360*W^3",
+      "eq_3_6_indian_in_W": "ARCV > 11.8371 - 6.3226*W + 0.7319*W^2 - 0.1018*W^3",
+      "eq_3_7_bruin_in_DAZ": "ARCV > 10.136 + 0.14*|DAZ| - 0.03*DAZ^2"
+    }
+  },
+  "odeh_2004": {
+    "source": "Odeh, M.Sh. (2004), 'New criterion for lunar crescent visibility', Experimental Astronomy 18:39-64, doi:10.1007/s10686-005-9002-5, eq (2), Tables IV and V. PDF copy: http://bruneiastronomy.org/web/wp-content/uploads/2015/07/New_Criterion_Crescent.pdf",
+    "v_definition": "V = ARCV - (-0.1018*W^3 + 0.7319*W^2 - 6.3226*W + 7.1651), ARCV airless topocentric (deg), W topocentric width (arcmin)",
+    "v_polynomial_coefficients_w0_to_w3": [7.1651, -6.3226, 0.7319, -0.1018],
+    "zones": [
+      {"code": "A", "v_lower_inclusive": 5.65, "text": "Crescent is visible by naked eyes"},
+      {"code": "B", "v_lower_inclusive": 2.0, "v_upper_exclusive": 5.65, "text": "Visible by optical aid, and it could be seen by naked eyes"},
+      {"code": "C", "v_lower_inclusive": -0.96, "v_upper_exclusive": 2.0, "text": "Visible by optical aid only"},
+      {"code": "D", "v_upper_exclusive": -0.96, "text": "Not visible even by optical aid"}
+    ],
+    "table_v": {
+      "W": [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
+      "ARCV1": [5.6, 5.0, 4.4, 3.8, 3.2, 2.7, 2.1, 1.6, 1.0],
+      "ARCV2": [8.5, 7.9, 7.3, 6.7, 6.2, 5.6, 5.1, 4.5, 4.0],
+      "ARCV3": [12.2, 11.6, 11.0, 10.4, 9.8, 9.3, 8.7, 8.2, 7.6]
+    },
+    "best_time": "Tb = Ts + (4/9) * Lag (eq 1, after Yallop 1997)",
+    "danjon_limit_deg": 6.4,
+    "saao_table_iv": {
+      "source_note": "SAAO criterion (Caldwell and Laney 2001) as reproduced in Odeh (2004) Table IV. DALT = apparent altitude of the Moon's lower limb at sunset.",
+      "DAZ": [0, 5, 10, 15, 20],
+      "DALT1": [6.3, 5.9, 4.9, 3.8, 2.6],
+      "DALT2": [8.2, 7.8, 6.8, 5.7, 4.5]
+    }
+  }
+}
