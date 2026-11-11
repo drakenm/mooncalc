@@ -219,7 +219,10 @@ export class TrajectoryView {
     for (let i = 0; i < cols; i++) {
       const m = ((i + 0.5) / cols) * 1440;
       ctx.fillStyle = bandColor(series.at(start + m * 60_000).sunAltDeg);
-      ctx.fillRect(x((i / cols) * 1440), b.y0, (b.x1 - b.x0) / cols + 0.6, b.y1 - b.y0);
+      // Whole-pixel columns, so neighbouring bands do not leave seams.
+      const xa = Math.round(x((i / cols) * 1440));
+      const xb = Math.round(x(((i + 1) / cols) * 1440));
+      ctx.fillRect(xa, b.y0, xb - xa, b.y1 - b.y0);
     }
     // Grid.
     ctx.strokeStyle = 'rgb(128 128 128 / 0.3)';

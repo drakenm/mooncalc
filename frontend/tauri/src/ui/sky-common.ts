@@ -258,7 +258,7 @@ export function rotateCcw(ref: [number, number], angleDeg: number): [number, num
  * vector). The terminator is the ellipse of semi-axis |1 − 2k| (Meeus eq.
  * 48.1; `mooncalc_app::sky::geometry::crescent_rows`).
  */
-export function drawMoon(ctx: CanvasRenderingContext2D, x: number, y: number, r: number, k: number, limb: [number, number], earthshine = 'rgb(60 64 78 / 0.85)'): void {
+export function drawMoon(ctx: CanvasRenderingContext2D, x: number, y: number, r: number, k: number, limb: [number, number], earthshine = 'rgb(72 76 92 / 0.9)'): void {
   const [ux, uy] = limb;
   const [vx, vy] = [uy, -ux];
   ctx.save();
@@ -266,7 +266,9 @@ export function drawMoon(ctx: CanvasRenderingContext2D, x: number, y: number, r:
   ctx.arc(x, y, r, 0, 2 * Math.PI);
   ctx.fillStyle = earthshine;
   ctx.fill();
-  const kk = Math.max(0, Math.min(1, k));
+  // Display only: keep a thin crescent at least ~2.4 px wide at its middle
+  // (lit width 2k radii) so a 1–3 % Moon stays visible at small sizes.
+  const kk = Math.max(Math.min(1, Math.max(0, k)), k > 0.001 ? Math.min(0.5, 1.2 / Math.max(r, 1)) : 0);
   const pt = (u: number, v: number): [number, number] => [x + r * (u * ux + v * vx), y + r * (u * uy + v * vy)];
   ctx.beginPath();
   const n = 48;
@@ -282,8 +284,11 @@ export function drawMoon(ctx: CanvasRenderingContext2D, x: number, y: number, r:
     ctx.lineTo(px, py);
   }
   ctx.closePath();
-  ctx.fillStyle = '#f4f0dc';
+  ctx.fillStyle = '#fbf7e4';
+  ctx.shadowColor = 'rgb(255 250 220 / 0.8)';
+  ctx.shadowBlur = Math.min(6, r / 3);
   ctx.fill();
+  ctx.shadowBlur = 0;
   ctx.beginPath();
   ctx.arc(x, y, r, 0, 2 * Math.PI);
   ctx.strokeStyle = 'rgb(240 236 215 / 0.35)';

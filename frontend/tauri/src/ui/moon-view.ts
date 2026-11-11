@@ -225,7 +225,7 @@ export class MoonTabView {
         h('span', { class: 'inline' }, step('−1 d', -24), step('−1 h', -1), step('+1 h', 1), step('+1 d', 24)),
         this.status,
       ),
-      h('div', { class: 'moon-grid' }, this.discEl, h('div', { class: 'moon-side' }, this.data, h('h3', {}, 'Libration through the lunation'), this.graphEl)),
+      h('div', { class: 'moon-grid' }, this.discEl, h('div', { class: 'moon-side' }, h('h3', {}, 'Libration through the lunation'), this.graphEl, this.data)),
     );
 
     const refresh = debounce(() => void this.refresh(), 120);
