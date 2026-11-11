@@ -520,8 +520,14 @@ impl MapTab {
             .map(|(_, m)| m.clone())
             .or(self.map.clone())
         else {
-            ui.spinner();
-            ui.label("Computing the first map…");
+            if self.compute.is_running() || self.pending.is_some() {
+                ui.spinner();
+                ui.label("Computing the first map…");
+            } else if let Some(e) = &self.error {
+                ui.colored_label(ui.visuals().error_fg_color, e);
+            } else {
+                ui.weak("No map yet.");
+            }
             return;
         };
         ui.heading(&map.criterion_name);

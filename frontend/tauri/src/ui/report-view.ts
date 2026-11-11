@@ -38,6 +38,7 @@ const STATUS_LABEL: Record<string, string> = {
   'midnight-sun': 'Midnight Sun',
   'polar-night': 'Polar night',
   'sun-altitude-not-reached': 'Sun altitude not reached',
+  'outside-ephemeris': 'Outside the ephemeris coverage',
 };
 
 export class ReportView {

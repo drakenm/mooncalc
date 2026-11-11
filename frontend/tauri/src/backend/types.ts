@@ -139,6 +139,8 @@ export interface StatusCounts {
   midnightSun: number;
   polarNight: number;
   sunAltitudeNotReached: number;
+  /** Cells whose evening falls outside the ephemeris coverage. */
+  outsideEphemeris: number;
 }
 
 export interface BestCell {

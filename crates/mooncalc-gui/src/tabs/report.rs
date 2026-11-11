@@ -530,7 +530,11 @@ impl ReportTab {
             ui.colored_label(ui.visuals().error_fg_color, format!("Report: {e}"));
         }
         let Some(data) = &self.data else {
-            ui.spinner();
+            // Only spin while a report is actually being computed; outside the
+            // ephemeris coverage nothing is submitted and the error says why.
+            if self.job.is_running() {
+                ui.spinner();
+            }
             return;
         };
         let k = &data.key;

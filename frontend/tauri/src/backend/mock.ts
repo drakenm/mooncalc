@@ -191,7 +191,7 @@ export class MockBackend implements Backend {
       values: null,
       thresholds: c.thresholds,
       zoneCounts,
-      statusCounts: { crescent: zoneCounts.reduce((a, b) => a + b, 0), beforeConjunction: 0, moonSetsFirst: 0, moonAlwaysUp: 0, moonAlwaysDown: 0, midnightSun: 0, polarNight: 0, sunAltitudeNotReached: 0 },
+      statusCounts: { crescent: zoneCounts.reduce((a, b) => a + b, 0), beforeConjunction: 0, moonSetsFirst: 0, moonAlwaysUp: 0, moonAlwaysDown: 0, midnightSun: 0, polarNight: 0, sunAltitudeNotReached: 0, outsideEphemeris: 0 },
       conjunction: { ...p.date, hour: 0, minute: 0, second: 0 },
       evaluationTime: c.evaluationTime,
       dateConvention: mapConvention(p.date, p.crescent),
