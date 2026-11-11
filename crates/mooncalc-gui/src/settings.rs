@@ -16,6 +16,7 @@ use serde::{Deserialize, Serialize};
 use crate::backend::BackendChoice;
 use crate::datetime;
 use crate::tabs::Tab;
+use crate::tabs::calendar::CalendarSettings;
 
 /// eframe storage key for [`Settings`].
 pub const SETTINGS_KEY: &str = "mooncalc.settings";
@@ -33,6 +34,8 @@ pub struct Settings {
     /// Path to a DE440/DE440s `.bsp` file (used with [`BackendChoice::De440`]).
     pub de440_path: String,
     pub view: ViewSettings,
+    /// Calendar-tab choices (selected Hijri calendar, month layout).
+    pub calendar: CalendarSettings,
 }
 
 impl Default for Settings {
@@ -45,6 +48,7 @@ impl Default for Settings {
             backend: BackendChoice::Meeus,
             de440_path: String::new(),
             view: ViewSettings::default(),
+            calendar: CalendarSettings::default(),
         }
     }
 }
@@ -261,6 +265,10 @@ mod tests {
                 show_inputs_panel: false,
                 show_status_bar: true,
                 active_tab: Tab::Calendar,
+            },
+            calendar: CalendarSettings {
+                calendar_id: "tabular-2-civil".into(),
+                ..CalendarSettings::default()
             },
         }
     }
