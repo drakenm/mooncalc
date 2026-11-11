@@ -21,6 +21,7 @@ mooncalc-visibility.workspace = true
 mooncalc-maps.workspace = true
 mooncalc-hijri.workspace = true
 mooncalc-atlas.workspace = true
+mooncalc-app.workspace = true
 mooncalc-spk = { workspace = true, optional = true }
 eframe.workspace = true
 egui.workspace = true

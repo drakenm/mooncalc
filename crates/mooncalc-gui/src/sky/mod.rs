@@ -1,21 +1,24 @@
 //! Shared machinery of the **Sky** and **Trajectory** tabs.
 //!
 //! * [`geometry`]: pure projection math (horizon panorama, all-sky,
-//!   compass, star chart), the crescent's orientation (parallactic angle,
-//!   bright limb from the zenith), sky colours and small helpers. Unit-tested.
-//! * [`scene`]: Sun and Moon states from an ephemeris, the evening or
-//!   morning of a crescent sighting ([`scene::Night`]) and one local day
-//!   ([`scene::Day`]); [`scene::ephemeris`] is the single hook that picks
-//!   the ephemeris.
+//!   compass, star chart), screen directions and sky colours, plus the
+//!   crescent's orientation (parallactic angle, bright limb from the
+//!   zenith) and small helpers re-exported from `mooncalc-app`. Unit-tested.
+//! * [`scene`]: the evening or morning of a crescent sighting
+//!   ([`scene::Night`]) and one local day ([`scene::Day`]), computed by
+//!   [`mooncalc_app::sky::scene`] and keyed by the GUI settings;
+//!   [`scene::ephemeris`] is the single hook that picks the ephemeris.
 //! * [`stars`]: the embedded bright-star list (Yale BSC5, V < 3.5) and its
-//!   reduction to the equinox of date.
+//!   reduction to the equinox of date, from [`mooncalc_app::sky::stars`].
 //! * [`draw`]: egui painter helpers (phased Moon, Sun, stars, gradients).
+//!
+//! The frontend-independent parts live in [`mooncalc_app::sky`], shared
+//! with the Tauri frontend.
 
 pub mod draw;
 pub mod geometry;
 pub mod scene;
-pub mod stars;
-mod stars_data;
+pub use mooncalc_app::sky::stars;
 
 use crate::datetime::DateTimeFields;
 

@@ -34,6 +34,8 @@ pub mod ephemeris;
 pub mod info;
 pub mod map;
 pub mod report;
+pub mod sky;
+pub mod trajectory;
 pub mod validate;
 
 #[cfg(test)]

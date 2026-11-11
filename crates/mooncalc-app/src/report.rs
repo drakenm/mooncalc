@@ -46,7 +46,7 @@ pub fn status_code(s: Status) -> &'static str {
     }
 }
 
-fn status_text(s: Status, crescent: Crescent) -> String {
+pub(crate) fn status_text(s: Status, crescent: Crescent) -> String {
     let evening = crescent == Crescent::Evening;
     match s {
         Status::Crescent => {
