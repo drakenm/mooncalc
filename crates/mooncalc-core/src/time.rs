@@ -26,6 +26,8 @@ impl Instant {
     }
 
     pub fn add_days(self, days: f64) -> Self {
-        Self { jd_ut: self.jd_ut + days }
+        Self {
+            jd_ut: self.jd_ut + days,
+        }
     }
 }

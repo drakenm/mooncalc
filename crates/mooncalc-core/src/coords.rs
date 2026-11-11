@@ -14,7 +14,11 @@ pub struct GeoLocation {
 
 impl GeoLocation {
     pub const fn new(lat_deg: f64, lon_deg: f64, elevation_m: f64) -> Self {
-        Self { lat_deg, lon_deg, elevation_m }
+        Self {
+            lat_deg,
+            lon_deg,
+            elevation_m,
+        }
     }
 }
 
