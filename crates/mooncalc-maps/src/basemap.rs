@@ -498,14 +498,25 @@ impl LandMask {
     /// for smooth coast edges.
     #[inline]
     pub fn land_fraction(&self, lat_deg: f64, lon_deg: f64) -> f32 {
-        let u = (lon_deg + 180.0) / 360.0 * self.width as f64 - 0.5;
-        let v = (90.0 - lat_deg) / 180.0 * self.height as f64 - 0.5;
+        let u = (lon_deg + 180.0) * (self.width as f64 * (1.0 / 360.0)) - 0.5;
+        let v = (90.0 - lat_deg) * (self.height as f64 * (1.0 / 180.0)) - 0.5;
         let (u0, v0) = (u.floor(), v.floor());
         let (tx, ty) = ((u - u0) as f32, (v - v0) as f32);
-        let (c, r) = (u0 as isize, v0 as isize);
-        let f = |b: bool| if b { 1.0f32 } else { 0.0 };
-        let top = f(self.cell(c, r)) * (1.0 - tx) + f(self.cell(c + 1, r)) * tx;
-        let bot = f(self.cell(c, r + 1)) * (1.0 - tx) + f(self.cell(c + 1, r + 1)) * tx;
+        let w = self.width as isize;
+        let mut c0 = u0 as isize;
+        if c0 < 0 || c0 >= w {
+            c0 = c0.rem_euclid(w);
+        }
+        let c1 = if c0 + 1 == w { 0 } else { c0 + 1 };
+        let hmax = self.height as isize - 1;
+        let r0 = (v0 as isize).clamp(0, hmax) as usize;
+        let r1 = (v0 as isize + 1).clamp(0, hmax) as usize;
+        let (c0, c1) = (c0 as usize, c1 as usize);
+        let bit = |r: usize, c: usize| {
+            (self.bits[r * self.words_per_row + c / 64] >> (c % 64) & 1) as f32
+        };
+        let top = bit(r0, c0) * (1.0 - tx) + bit(r0, c1) * tx;
+        let bot = bit(r1, c0) * (1.0 - tx) + bit(r1, c1) * tx;
         top * (1.0 - ty) + bot * ty
     }
 }

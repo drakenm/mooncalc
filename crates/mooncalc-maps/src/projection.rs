@@ -34,6 +34,16 @@ pub trait Projection {
     /// Width / height of the map frame.
     fn aspect_ratio(&self) -> f64;
 
+    /// Unprojects a row of points sharing one `y`, writing one result per
+    /// entry of `xs` into `out` (same length). Equivalent to calling
+    /// [`inverse`](Self::inverse) per point; projections override it when a
+    /// row can be computed faster (latitude constant along the row).
+    fn inverse_row(&self, y: f64, xs: &[f64], out: &mut [Option<(f64, f64)>]) {
+        for (o, &x) in out.iter_mut().zip(xs) {
+            *o = self.inverse(x, y);
+        }
+    }
+
     /// The longitude at which the map is cut (its left and right edges),
     /// for cylindrical and pseudo-cylindrical projections. Lines crossing it
     /// must be split. `None` for projections without a seam.
@@ -138,6 +148,30 @@ impl Projection for Equirectangular {
 
     fn aspect_ratio(&self) -> f64 {
         self.lon_span() / self.lat_span()
+    }
+
+    fn inverse_row(&self, y: f64, xs: &[f64], out: &mut [Option<(f64, f64)>]) {
+        if !(0.0..=1.0).contains(&y) {
+            out.fill(None);
+            return;
+        }
+        let lat = self.lat_max_deg - y * self.lat_span();
+        let lon0 = normalize_lon(self.lon_min_deg);
+        let span = self.lon_span();
+        for (o, &x) in out.iter_mut().zip(xs) {
+            *o = if (0.0..=1.0).contains(&x) {
+                let mut lon = lon0 + x * span;
+                if lon >= 180.0 {
+                    lon -= 360.0;
+                    if lon >= 180.0 {
+                        lon = normalize_lon(lon);
+                    }
+                }
+                Some((lat, lon))
+            } else {
+                None
+            };
+        }
     }
 
     fn seam_lon_deg(&self) -> Option<f64> {
@@ -278,6 +312,31 @@ impl Projection for Robinson {
         (2.0 * PI * ROBINSON_KX) / (2.0 * ROBINSON_KY)
     }
 
+    fn inverse_row(&self, y: f64, xs: &[f64], out: &mut [Option<(f64, f64)>]) {
+        let yy = (0.5 - y) * 2.0;
+        if yy.abs() > 1.0 {
+            out.fill(None);
+            return;
+        }
+        let lat = robinson_lat_from_y(yy.abs()).copysign(yy);
+        let k = 360.0 / robinson_interp(&ROBINSON_X, false, lat.abs());
+        let c = normalize_lon(self.central_lon_deg);
+        for (o, &x) in out.iter_mut().zip(xs) {
+            let dlon = (x - 0.5) * k;
+            *o = if dlon.abs() > 180.0 {
+                None
+            } else {
+                let mut lon = c + dlon;
+                if lon >= 180.0 {
+                    lon -= 360.0;
+                } else if lon < -180.0 {
+                    lon += 360.0;
+                }
+                Some((lat, lon))
+            };
+        }
+    }
+
     fn seam_lon_deg(&self) -> Option<f64> {
         Some(normalize_lon(self.central_lon_deg + 180.0))
     }
@@ -320,6 +379,33 @@ impl Orthographic {
     }
 }
 
+impl Orthographic {
+    /// Inverse for plane coordinates `(px, py)` on the unit disc. With
+    /// `sin c = ρ`, Snyder's inverse simplifies to
+    /// φ = asin(cos c sin φ₀ + y cos φ₀) and
+    /// λ = λ₀ + atan2(x, cos φ₀ cos c − y sin φ₀).
+    #[inline]
+    fn inverse_with(&self, sp0: f64, cp0: f64, px: f64, py: f64) -> Option<(f64, f64)> {
+        let rho2 = px * px + py * py;
+        if rho2 > 1.0 {
+            return None;
+        }
+        let cc = (1.0 - rho2).sqrt();
+        let lat = (cc * sp0 + py * cp0).clamp(-1.0, 1.0).asin();
+        let den = cp0 * cc - py * sp0;
+        let dlon = if px == 0.0 && den == 0.0 {
+            0.0
+        } else {
+            px.atan2(den)
+        };
+        let mut lon = self.center_lon_deg + dlon.to_degrees();
+        if !(-180.0..180.0).contains(&lon) {
+            lon = normalize_lon(lon);
+        }
+        Some((lat.to_degrees(), lon))
+    }
+}
+
 impl Projection for Orthographic {
     fn forward(&self, lat_deg: f64, lon_deg: f64) -> Option<(f64, f64)> {
         let (sp0, cp0) = self.center_lat_deg.to_radians().sin_cos();
@@ -335,24 +421,16 @@ impl Projection for Orthographic {
     }
 
     fn inverse(&self, x: f64, y: f64) -> Option<(f64, f64)> {
-        let px = (x - 0.5) * 2.0;
-        let py = (0.5 - y) * 2.0;
-        let rho = px.hypot(py);
-        if rho > 1.0 {
-            return None;
-        }
         let (sp0, cp0) = self.center_lat_deg.to_radians().sin_cos();
-        if rho < 1e-15 {
-            return Some((self.center_lat_deg, normalize_lon(self.center_lon_deg)));
+        self.inverse_with(sp0, cp0, (x - 0.5) * 2.0, (0.5 - y) * 2.0)
+    }
+
+    fn inverse_row(&self, y: f64, xs: &[f64], out: &mut [Option<(f64, f64)>]) {
+        let (sp0, cp0) = self.center_lat_deg.to_radians().sin_cos();
+        let py = (0.5 - y) * 2.0;
+        for (o, &x) in out.iter_mut().zip(xs) {
+            *o = self.inverse_with(sp0, cp0, (x - 0.5) * 2.0, py);
         }
-        let c = rho.asin();
-        let (sc, cc) = c.sin_cos();
-        let lat = (cc * sp0 + py * sc * cp0 / rho).clamp(-1.0, 1.0).asin();
-        let dlon = (px * sc).atan2(rho * cp0 * cc - py * sp0 * sc);
-        Some((
-            lat.to_degrees(),
-            normalize_lon(self.center_lon_deg + dlon.to_degrees()),
-        ))
     }
 
     fn aspect_ratio(&self) -> f64 {
@@ -406,6 +484,9 @@ impl Projection for MapProjection {
     }
     fn aspect_ratio(&self) -> f64 {
         self.inner().aspect_ratio()
+    }
+    fn inverse_row(&self, y: f64, xs: &[f64], out: &mut [Option<(f64, f64)>]) {
+        self.inner().inverse_row(y, xs, out)
     }
     fn seam_lon_deg(&self) -> Option<f64> {
         self.inner().seam_lon_deg()
@@ -551,6 +632,37 @@ mod tests {
         assert!((x - 1.0).abs() < 1e-12 && (y - 0.5).abs() < 1e-12);
         let (x, y) = Orthographic::new(0.0, 0.0).forward(90.0, 0.0).unwrap();
         assert!((x - 0.5).abs() < 1e-12 && y.abs() < 1e-12);
+    }
+
+    #[test]
+    fn inverse_row_matches_inverse() {
+        let xs: Vec<f64> = (0..=200).map(|i| -0.05 + i as f64 * 0.0055).collect();
+        let projs: [MapProjection; 4] = [
+            Equirectangular::world(0.0).into(),
+            Equirectangular::world(170.0).into(),
+            Robinson::new(-120.0).into(),
+            Orthographic::new(40.0, 10.0).into(),
+        ];
+        for p in projs {
+            for y in [-0.01, 0.0, 0.13, 0.5, 0.77, 1.0] {
+                let mut out = vec![None; xs.len()];
+                p.inverse_row(y, &xs, &mut out);
+                for (&x, got) in xs.iter().zip(&out) {
+                    let want = p.inverse(x, y);
+                    match (want, *got) {
+                        (None, None) => {}
+                        (Some(a), Some(b)) => {
+                            assert!(
+                                (a.0 - b.0).abs() < 1e-9 && lon_diff(a.1, b.1) < 1e-9,
+                                "{p:?} {x} {y}"
+                            );
+                            assert!((-180.0..180.0).contains(&b.1));
+                        }
+                        _ => panic!("{p:?} visibility differs at ({x}, {y})"),
+                    }
+                }
+            }
+        }
     }
 
     #[test]
