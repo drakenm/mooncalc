@@ -19,7 +19,7 @@ GitHub issues can't be filed from this environment yet: the `gh` CLI is authenti
 | hijri | The computed Umm al-Qura rule applies the 1423 AH rule before 1420 AH. The 1392–1419 conjunction-time rule and the earlier rules van Gent describes are not implemented. | hijri visibility |
 | hijri | Regional visibility calendars use lat/lon boxes that include sea. A land mask (e.g. the maps basemap, passed in as points) would keep ocean-only sightings out. | hijri visibility |
 
-| gui | Sky/Trajectory tab view options aren't persisted, and their scenes compute on the UI thread (slow with DE440). No planets or constellation lines in the star chart. | sky + trajectory |
+| gui | No planets or constellation lines in the Sky tab's star chart. | sky + trajectory |
 | core | ΔT beyond 2026.75 is an extrapolation; refresh the observed table from IERS periodically. | core validation |
 | gui | Arabic month names need a bundled Arabic font plus text shaping in egui. | gui calendar |
 | core | Meeus ch. 52 maximum declinations drift up to about 40 min and 100″ in some years; prefer the refined values (documented in `nodes.rs`). | lunar events |
@@ -40,10 +40,11 @@ GitHub issues can't be filed from this environment yet: the `gh` CLI is authenti
 | fixtures | Odeh Table VI is missing 159 naked-eye rows (V > 8.18). ICOP records weren't extractable. | validation |
 | licensing | Confirm that committing the Yallop (Crown copyright) and Odeh (Springer) tables as test data is acceptable before the repository goes public. | validation |
 | app, gui, tauri | The map date is the selected city's civil date, but map cells put the date line on the 180° meridian. East of 180° in UTC+13/+14 zones (Tonga, Samoa, Kiribati), the map cell under the marker shows the next civil evening (or morning), so it disagrees with the report: at Apia on 2024-03-10 the report says "Moon sets first" and the map shows Yallop zone B. Shift the map date for such places, or show the evening in the legend. | integration review |
-| gui | With DE440 near or beyond its range, the Sky, Moon, ephemeris-table and calendar tabs don't check coverage (only the map and report do). Searches now end, and Hijri months come out `None`, but the views show NaN or missing values with no message. | integration review |
-| visibility | `circumstances::compute` maps NaN positions (ephemeris out of range) to `NoSunEvent(MidnightSun/PolarNight)` silently. An explicit "not covered" outcome, or a range check, would stop library callers from misreporting polar conditions. | integration review |
 | tauri | Event times are formatted from hour and minute only, so seconds are truncated; egui and the HMNAO/USNO tables round to the nearest minute. | integration review |
 | hijri | A computed calendar returns `None` for a whole year when the year before it is not fully covered by the ephemeris (the chain merge needs it), e.g. 1266 AH with DE440s, although its later months are covered. | integration review |
 | tauri | Sky/Trajectory/Moon tabs: view options (view, zoom, disc scale, toggles, orientation) aren't persisted (only the Moon tab's crater is); no planets or constellation lines; compass rise/set labels can overlap near due west. | tauri sky + moon |
 | tauri | The browser draws from service output with small display helpers that mirror Rust: `phaseName`, `compassPoint`, `skyColor` (egui `sky::geometry`), star alt/az with Bennett refraction, and the Moon disc projection of `mooncalc_app::moon::disc::View`. Move them behind the WASM backend when it lands, or keep the copies in step. | tauri sky + moon |
+| gui | Outside the DE440 coverage the Map and Report tabs show their coverage error next to a spinner that never stops ("Computing map…", "Computing the first map…", the report's spinner). | gui robustness |
+| tauri, app | The new status `outside-ephemeris` and `StatusCounts.outsideEphemeris` aren't in `frontend/tauri/src/backend/types.ts` or the mock backend yet; the Tauri map legend and report should name them. | gui robustness |
+| gui | The Sky and Trajectory jobs can't be cancelled inside `NightScene::compute`/`DayScene::compute`, so fast date scrubbing runs one short thread per date (1–8 ms each, measured). The Moon disc raster stays on the UI thread: 18 ms at 512 px in release (41 ms debug), only when the view changes. | gui robustness |
 | tauri | `MockBackend`'s sky API is a low-precision model (about 0.3° for the Moon, optical libration only, 25 stars, 10 craters) for `npm run dev`; screenshots of real behaviour need the desktop app. | tauri sky + moon |

@@ -23,7 +23,7 @@ Dependency direction: `core` ← `visibility` ← `maps`, `core` ← `hijri` ←
 
 | Frontend | Status | Notes |
 | --- | --- | --- |
-| egui (`mooncalc-gui`) | Primary, built now | Native, single binary. |
+| egui (`mooncalc-gui`) | Primary, built now | Native, single binary. Expensive views (maps, tables, calendars, the Sky and Trajectory scenes) compute on background jobs (`jobs`, cancel-and-replace); view options persist in `Settings` with serde defaults. |
 | Tauri + TypeScript (`mooncalc-tauri`, `frontend/tauri/`) | Built alongside egui | Vite + TypeScript UI in a webview. Heavy computation stays in Rust, behind Tauri commands. |
 | TypeScript + WASM (`mooncalc-wasm`, `frontend/web/`) | Planned release addition | The same computations compiled to `wasm32-unknown-unknown` and run in the browser, with grids evaluated in Web Workers. |
 
@@ -43,6 +43,7 @@ Set out in the `mooncalc-core` crate docs and binding on every crate:
 
 - **Default:** Meeus, *Astronomical Algorithms* (2nd ed.). The Sun uses VSOP87 (truncated, ch. 25/32 or a fuller VSOP87D series), the Moon ELP-2000/82 (ch. 47). No data files are needed.
 - **`de440` feature:** `De440Ephemeris` reads a user-supplied DE440 or DE440s `.bsp` file at runtime. It reaches apparent geocentric positions through iterated light time, relativistic aberration, and the frame bias × IAU 2006 precession × IAU 1980 nutation rotation (`FrameModel::Iau2006`, the default; `FrameModel::Iau1976` is also available). It implements the same trait, so everything downstream is backend-agnostic. The core's GAST uses GMST 1982, which differs from the IAU 2006 equinox by at most 0.42″ over 1850–2150. That is negligible for visibility, and `de440::sidereal_time_offset` corrects it when needed.
+- **Coverage:** outside an ephemeris' `valid_range` (1849-12-26 to 2150-01-21 for DE440s) positions are NaN. `circumstances::compute_with` then returns `Outcome::OutsideEphemeris` (status `outside-ephemeris`) rather than a polar or "not visible" result. The egui tabs check the span they need, plus the look-back and look-ahead of their searches (a lunation for phases and the Moon's age), with `ActiveEphemeris::span_problem`, and show a notice instead of computing.
 
 ## Work packages
 
