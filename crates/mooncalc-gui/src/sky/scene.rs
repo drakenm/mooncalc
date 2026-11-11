@@ -124,12 +124,11 @@ pub fn snapshot<S: PositionSource + ?Sized>(
 
 /// The ephemeris used by the Sky and Trajectory tabs.
 ///
-/// **Single hook.** Until the shared backend (`crate::backend`) hands out
-/// its `Arc<dyn Ephemeris>`, this builds the Meeus/ELP ephemeris locally;
-/// point it at the shared backend then. The scene keys include
+/// The shared backend from [`crate::backend::resolve`] (Meeus, or DE440
+/// with its Meeus fallback). The scene keys include
 /// `settings.backend.effective()`, so a backend change recomputes them.
-pub fn ephemeris(_settings: &Settings) -> std::sync::Arc<dyn Ephemeris> {
-    std::sync::Arc::new(mooncalc_core::MeeusEphemeris::new())
+pub fn ephemeris(settings: &Settings) -> std::sync::Arc<dyn Ephemeris> {
+    crate::backend::resolve(settings.backend, &settings.de440_path).eph
 }
 
 /// UT of civil noon on local date `date` in a zone `tz_hours` ahead of UT.

@@ -41,7 +41,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::{Arc, Mutex};
 
-use mooncalc_core::{Ephemeris, GeoLocation, MeeusEphemeris};
+use mooncalc_core::{Ephemeris, GeoLocation};
 use mooncalc_hijri::chained::{month_from_index, month_index};
 use mooncalc_hijri::civil::{CivilCalendar, CivilDate};
 use mooncalc_hijri::tabular::TABULAR_II_CIVIL;
@@ -409,15 +409,8 @@ impl Engine {
         {
             return Ok(eph.clone());
         }
-        let eph = match backend::create_ephemeris(backend, de440_path) {
-            Ok(eph) => eph,
-            // The built-in theory needs no setup; use it even if the backend
-            // layer cannot provide it.
-            Err(_) if backend.effective() == BackendChoice::Meeus => {
-                Arc::new(MeeusEphemeris::new()) as Arc<dyn Ephemeris>
-            }
-            Err(e) => return Err(e),
-        };
+        // The shared backend (with its Meeus fallback for an unusable DE440).
+        let eph = backend::resolve(backend, de440_path).eph;
         *slot = Some((key, eph.clone()));
         Ok(eph)
     }
