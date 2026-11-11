@@ -13,7 +13,8 @@
 //!
 //! Cell semantics (each cell on its own local evening, the 180° meridian as
 //! the date line, sea-level observers) are those of the engine; see
-//! `mooncalc_maps::engine`.
+//! `mooncalc_maps::engine`. [`crate::dateline`] relates a map's date to an
+//! observer's civil date.
 
 use std::ops::Range;
 
@@ -399,6 +400,10 @@ impl MapOutput {
             status_counts: status_counts(&self.field.status, &self.grid.cells),
             conjunction: self.conjunction.into(),
             evaluation_time: criteria::evaluation_time_text(c.evaluation_time()),
+            date_convention: crate::dateline::map_convention(
+                self.params.date.into(),
+                self.params.crescent,
+            ),
             best: best_cell(&self.grid, &self.field),
             ephemeris: ephemeris_name.to_owned(),
             timing,

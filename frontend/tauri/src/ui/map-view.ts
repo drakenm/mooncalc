@@ -8,6 +8,7 @@
 // as a preview and re-rendered once the camera settles.
 
 import { BackendError, type Backend, type MapParams, type MapResult } from '../backend';
+import { observerNote } from '../dateline';
 import { changed, localDate, type AppState, type Store } from '../state';
 import { BasemapLayer } from './basemap-layer';
 import { debounce, h, replaceChildren } from './dom';
@@ -64,6 +65,8 @@ export class MapView {
   private readonly canvas = h('canvas', { class: 'map-canvas', tabindex: 0, 'aria-label': 'Visibility map' });
   private readonly ctx: CanvasRenderingContext2D;
   private readonly readout = h('span', { class: 'readout', 'aria-live': 'off' });
+  /** Shown when the evening under the observer is not their civil one. */
+  private readonly observerNote = h('p', { class: 'note map-date-note', role: 'note', hidden: true });
   private readonly status = h('span', { class: 'status' });
   private readonly info = h('div', { class: 'map-info' });
   private readonly overlay = h('div', { class: 'map-overlay', hidden: true });
@@ -129,7 +132,7 @@ export class MapView {
       ),
       this.info,
       stage,
-      h('div', { class: 'map-footer' }, this.readout, this.legend),
+      h('div', { class: 'map-footer' }, h('div', { class: 'map-readouts' }, this.readout, this.observerNote), this.legend),
     );
 
     window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
@@ -149,6 +152,7 @@ export class MapView {
         if (this.active) recompute();
       }
       if (changed(s, prev, ['location'])) this.requestDraw();
+      if (changed(s, prev, ['location', 'tzOffsetHours'])) this.updateObserverNote();
     });
     this.resolutionSelect.value = String(this.store.get().mapResolutionDeg);
     this.updateReadout();
@@ -199,6 +203,7 @@ export class MapView {
       this.zoneCamera = null;
       this.renderLegend();
       this.renderInfo();
+      this.updateObserverNote();
       this.overlay.hidden = true;
       const t = result.timing;
       replaceChildren(
@@ -294,7 +299,16 @@ export class MapView {
           )
         : h('span', {}, 'No crescent anywhere on this date'),
       h('span', { class: 'hint' }, r.ephemeris),
+      h('span', { class: 'hint map-convention' }, r.dateConvention),
     );
+  }
+
+  private updateObserverNote(): void {
+    const r = this.result;
+    const s = this.store.get();
+    const note = r ? observerNote(r.date, s.location.lonDeg, s.tzOffsetHours, r.crescent) : null;
+    this.observerNote.textContent = note ?? '';
+    this.observerNote.hidden = note === null;
   }
 
   // --- Camera -------------------------------------------------------------

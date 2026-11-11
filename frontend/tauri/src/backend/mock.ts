@@ -9,6 +9,7 @@ import { BackendError, type Backend } from './backend';
 import { bytesToBase64 } from './codec';
 import { mockSkyApi } from './mock-sky';
 import { mockCalendarApi, mockTablesApi } from './mock-extras';
+import { mapConvention, reportNote } from '../dateline';
 import {
   NO_DATA,
   type AppInfo,
@@ -193,6 +194,7 @@ export class MockBackend implements Backend {
       statusCounts: { crescent: zoneCounts.reduce((a, b) => a + b, 0), beforeConjunction: 0, moonSetsFirst: 0, moonAlwaysUp: 0, moonAlwaysDown: 0, midnightSun: 0, polarNight: 0, sunAltitudeNotReached: 0 },
       conjunction: { ...p.date, hour: 0, minute: 0, second: 0 },
       evaluationTime: c.evaluationTime,
+      dateConvention: mapConvention(p.date, p.crescent),
       best: null,
       ephemeris: 'mock',
       timing: { prepareMs: 0, evaluateMs: totalMs, encodeMs: 0, totalMs, threads: 1 },
@@ -215,6 +217,7 @@ export class MockBackend implements Backend {
       illuminationAtNoon: NaN,
       evening: emptyCrescent('evening'),
       morning: emptyCrescent('morning'),
+      mapDateNote: reportNote(p.date, p.location.lonDeg, p.tzOffsetHours),
     };
   }
 

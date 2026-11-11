@@ -53,6 +53,29 @@ pub fn map_date(settings: &Settings) -> CalendarDate {
     CalendarDate::from_jd(settings.time.jd_local())
 }
 
+fn app_crescent(c: Crescent) -> mooncalc_app::dto::Crescent {
+    match c {
+        Crescent::Evening => mooncalc_app::dto::Crescent::Evening,
+        Crescent::Morning => mooncalc_app::dto::Crescent::Morning,
+    }
+}
+
+/// When the evening (morning) a map of `date` shows under the observer is
+/// not their civil one of `date` (east of 180° in UTC+13/+14): the note,
+/// see `mooncalc_app::dateline::observer_note`.
+pub fn observer_note(
+    settings: &Settings,
+    date: CalendarDate,
+    crescent: Crescent,
+) -> Option<String> {
+    mooncalc_app::dateline::observer_note(
+        date,
+        settings.location.lon_deg,
+        settings.time.tz_offset_hours,
+        app_crescent(crescent),
+    )
+}
+
 #[derive(Clone, Debug, PartialEq)]
 struct RenderKey {
     map_id: u64,
@@ -321,8 +344,12 @@ impl MapTab {
                 });
             });
 
+        let note = self
+            .shown
+            .as_ref()
+            .and_then(|(_, m)| observer_note(tc.settings, m.spec.date, m.spec.crescent));
         egui::Panel::bottom("map_hover_strip").show(ui, |ui| {
-            self.hover_strip(ui);
+            self.hover_strip(ui, note.as_deref());
         });
 
         if let Some(e) = &self.error {
@@ -537,6 +564,22 @@ impl MapTab {
                 ui.label(&map.spec.ephemeris);
                 ui.end_row();
             });
+        ui.add(
+            egui::Label::new(
+                egui::RichText::new(mooncalc_app::dateline::map_convention(
+                    map.spec.date,
+                    app_crescent(map.spec.crescent),
+                ))
+                .weak(),
+            )
+            .wrap(),
+        );
+        if let Some(note) = observer_note(tc.settings, map.spec.date, map.spec.crescent) {
+            ui.add(
+                egui::Label::new(egui::RichText::new(note).color(ui.visuals().warn_fg_color))
+                    .wrap(),
+            );
+        }
 
         ui.add_space(6.0);
         ui.strong("Legend");
@@ -570,7 +613,7 @@ impl MapTab {
         self.earliest_panel(ui, tc);
     }
 
-    fn hover_strip(&self, ui: &mut egui::Ui) {
+    fn hover_strip(&self, ui: &mut egui::Ui, observer_note: Option<&str>) {
         let text = match (self.hover, self.shown.as_ref()) {
             (Some((lat, lon)), Some((_, map))) => {
                 let mut t = format!("{}  ", fmt_lat_lon_short(lat, lon));
@@ -603,6 +646,12 @@ impl MapTab {
             }
             ui.label(text);
         });
+        if let Some(note) = observer_note {
+            ui.add(
+                egui::Label::new(egui::RichText::new(note).color(ui.visuals().warn_fg_color))
+                    .wrap(),
+            );
+        }
     }
 
     fn earliest_panel(&mut self, ui: &mut egui::Ui, tc: &mut TabContext<'_>) {
@@ -836,5 +885,23 @@ mod tests {
         assert_eq!(map_date(&s), CalendarDate::new(2024, 3, 10));
         s.time.tz_offset_hours = 3.0;
         assert_eq!(map_date(&s), CalendarDate::new(2024, 3, 11));
+    }
+
+    #[test]
+    fn observer_note_where_the_civil_date_differs() {
+        let mut s = Settings::default();
+        let d = CalendarDate::new(2024, 3, 10);
+        // Apia, UTC+13: the map for 10 March shows its civil 11 March.
+        s.location.lon_deg = -171.7667;
+        s.time.tz_offset_hours = 13.0;
+        let note = observer_note(&s, d, Crescent::Evening).expect("note");
+        assert!(
+            note.contains("2024-03-11") && note.contains("2024-03-09"),
+            "{note}"
+        );
+        // London: none.
+        s.location.lon_deg = -0.13;
+        s.time.tz_offset_hours = 0.0;
+        assert!(observer_note(&s, d, Crescent::Evening).is_none());
     }
 }

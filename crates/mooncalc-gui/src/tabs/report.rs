@@ -60,6 +60,13 @@ impl ReportKey {
     pub fn civil_noon(&self) -> Instant {
         Instant::from_jd_ut(self.date.jd0() + 0.5 - self.tz_offset_hours / 24.0)
     }
+
+    /// When the world map for this date shows another evening at the
+    /// observer's longitude (its date line is the 180° meridian): the note
+    /// naming the map date that shows this report's evening.
+    pub fn map_date_note(&self) -> Option<mooncalc_app::dto::MapDateNote> {
+        mooncalc_app::dateline::report_note(self.date, self.lon_deg, self.tz_offset_hours)
+    }
 }
 
 /// One criterion's verdict.
@@ -420,6 +427,9 @@ pub fn report_text(data: &ReportData) -> String {
         crate::datetime::format_utc_offset(k.tz_offset_hours)
     );
     let _ = writeln!(out, "Ephemeris: {}", k.ephemeris);
+    if let Some(n) = k.map_date_note() {
+        let _ = writeln!(out, "Note: {}", n.text);
+    }
     for r in [&data.evening, &data.morning] {
         let _ = writeln!(out);
         let _ = writeln!(out, "== {} ==", heading(r.sighting));
@@ -548,6 +558,15 @@ impl ReportTab {
             k.ephemeris,
             crate::datetime::format_utc_offset(k.tz_offset_hours)
         ));
+        if let Some(n) = k.map_date_note() {
+            ui.add(
+                egui::Label::new(
+                    egui::RichText::new(format!("Map date: {}", n.text))
+                        .color(ui.visuals().warn_fg_color),
+                )
+                .wrap(),
+            );
+        }
         ui.separator();
         egui::ScrollArea::vertical().show(ui, |ui| {
             if ui.available_width() > 1100.0 {
@@ -672,6 +691,23 @@ mod tests {
         let text = report_text(&d);
         assert!(text.contains("Yallop") && text.contains("Sunset"));
         assert!(text.contains("UTC-10:00"));
+    }
+
+    #[test]
+    fn apia_report_names_the_map_date_that_shows_its_evening() {
+        // Apia (UTC+13, 171.8° W): the civil evening of 2024-03-10 is
+        // "Moon sets first"; the map for 2024-03-10 shows the next evening
+        // there, so the report points to the map for 2024-03-09.
+        let eph = MeeusEphemeris::new();
+        let k = key(-13.8333, -171.7667, CalendarDate::new(2024, 3, 10), 13.0);
+        let note = k.map_date_note().expect("note");
+        assert_eq!(note.day_shift, -1);
+        let d = compute_report(k, &eph, &JobContext::detached()).unwrap();
+        assert!(matches!(d.evening.best, Outcome::MoonSetsFirst(_)));
+        assert!(report_text(&d).contains("The world map for 2024-03-09"));
+        // London: no note.
+        let london = key(51.5, -0.13, CalendarDate::new(2024, 3, 10), 0.0);
+        assert!(london.map_date_note().is_none());
     }
 
     #[test]

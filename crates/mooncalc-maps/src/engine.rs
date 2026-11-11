@@ -21,6 +21,17 @@
 //! UT two days later; the engine tabulates the ephemeris from one day
 //! before to three days after 0h UT on the date.
 //!
+//! # Map date versus civil date
+//!
+//! A local observer's civil date agrees with this rule wherever their zone
+//! offset is within 12 h of mean solar time (`λ/15°`). East of 180° in
+//! UTC+13/+14 (Samoa, Tonga, the Line Islands) the civil date runs a day
+//! ahead: the map for 10 March shows their civil evening of 11 March, and
+//! their civil 10 March is on the map for 9 March.
+//! [`CalendarDate::mean_time_date`] gives the map date for a civil date and
+//! zone, [`CalendarDate::civil_date_of_mean_time`] the inverse;
+//! `mooncalc_app::dateline` words the notes the frontends show.
+//!
 //! # Performance
 //!
 //! [`EngineContext::new`] evaluates the ephemeris once on a 30-minute table

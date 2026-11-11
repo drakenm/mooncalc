@@ -477,6 +477,28 @@ input:invalid {
   min-height: 1.45em;
 }
 
+.map-readouts {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* Date-line note (report and map): the map date differs from the civil date. */
+.map-date-note {
+  margin: 0 0 8px;
+  padding: 6px 10px;
+  border-radius: var(--radius);
+  background: var(--warn-bg);
+  color: var(--warn-text);
+  font-size: 12px;
+  line-height: 1.4;
+  max-width: 80ch;
+}
+
+.map-readouts .map-date-note {
+  margin: 0;
+}
+
 .legend {
   display: flex;
   flex-wrap: wrap;

@@ -73,6 +73,51 @@ impl CalendarDate {
         let lon = (lon_deg + 180.0).rem_euclid(360.0) - 180.0;
         Instant::from_jd_ut(self.jd0() + 0.5 - lon / 360.0)
     }
+
+    /// The **mean-time date** of this civil date at east longitude `lon_deg`
+    /// in a time zone `utc_offset_hours` ahead of UT: the date whose
+    /// [`Self::local_mean_noon`] at `lon_deg` is nearest civil noon of this
+    /// date, so the two days share the same evening and morning.
+    ///
+    /// World visibility maps evaluate each place on the local-mean-time day of
+    /// the map's date (the HMNAO convention, date line on the 180° meridian),
+    /// so this is the date of the map that shows a local observer's civil
+    /// evening of `self` at their longitude. It equals `self` wherever the
+    /// zone offset is within 12 h of mean solar time (`λ/15°`), which is
+    /// nearly everywhere; east of 180° in UTC+13/+14 (Samoa, Tonga, the Line
+    /// Islands) it is the day before. See [`mean_time_day_shift`].
+    pub fn mean_time_date(&self, lon_deg: f64, utc_offset_hours: f64) -> Self {
+        self.add_days(mean_time_day_shift(lon_deg, utc_offset_hours))
+    }
+
+    /// The inverse of [`Self::mean_time_date`]: the civil date (zone
+    /// `utc_offset_hours`) whose evening and morning the local-mean-time day
+    /// `self` contains at `lon_deg`. For a world map of date `self`, this is
+    /// the local civil date of the evening shown at that longitude.
+    pub fn civil_date_of_mean_time(&self, lon_deg: f64, utc_offset_hours: f64) -> Self {
+        self.add_days(-mean_time_day_shift(lon_deg, utc_offset_hours))
+    }
+}
+
+/// Days from a civil date in a zone `utc_offset_hours` ahead of UT to its
+/// local-mean-time date at east longitude `lon_deg`
+/// ([`CalendarDate::mean_time_date`]): `round(λ/360° − offset/24 h)`, with
+/// the longitude reduced to `[−180°, 180°)` as in
+/// [`CalendarDate::local_mean_noon`].
+///
+/// Civil noon of date `D` is `D 0h UT + 12h − offset`; local mean noon of
+/// date `D′` is `D′ 0h UT + 12h − λ/15`. Their difference,
+/// `(D′ − D) − (λ/360 − offset/24)` days, is smallest for this shift, and the
+/// evenings (each the sunset after the Sun's transit nearest the anchor) are
+/// then the same. The shift is −1 where the civil date runs ahead of mean
+/// time by more than half a day (Apia, 171.8° W, UTC+13: −1.02 → −1), +1
+/// where it runs behind, and 0 elsewhere (London; Ürümqi on UTC+8 at
+/// 87.6° E: −0.09 → 0). The tie at exactly half a day is resolved away from
+/// zero; there the transits lie about 12 h from both anchors and the sunset
+/// assignment depends on the equation of time, a case no inhabited zone hits.
+pub fn mean_time_day_shift(lon_deg: f64, utc_offset_hours: f64) -> i32 {
+    let lon = (lon_deg + 180.0).rem_euclid(360.0) - 180.0;
+    (lon / 360.0 - utc_offset_hours / 24.0).round() as i32
 }
 
 #[cfg(test)]
@@ -93,5 +138,52 @@ mod tests {
         assert!((d.local_mean_noon(90.0).jd_ut - (d.jd0() + 0.25)).abs() < 1e-12);
         assert_eq!(d.local_mean_noon(180.0), d.local_mean_noon(-180.0));
         assert!((d.local_mean_noon(-179.0).jd_ut - (d.jd0() + 0.5 + 179.0 / 360.0)).abs() < 1e-12);
+    }
+
+    #[test]
+    fn mean_time_date_follows_the_180_degree_date_line() {
+        let d = CalendarDate::new(2024, 3, 10);
+        // Apia and Nuku'alofa (UTC+13), Kiritimati (UTC+14), the Chatham
+        // Islands (UTC+12:45 at 176.6° W) and 180° itself on UTC+12 (180° is
+        // the map's western edge) are a day ahead of mean time: their civil
+        // 10 March is the map's 9 March.
+        for (lon, tz) in [
+            (-171.7667, 13.0),
+            (-175.2011, 13.0),
+            (-157.4, 14.0),
+            (-176.56, 12.75),
+            (180.0, 12.0),
+        ] {
+            assert_eq!(mean_time_day_shift(lon, tz), -1, "{lon} {tz}");
+            assert_eq!(d.mean_time_date(lon, tz), CalendarDate::new(2024, 3, 9));
+            assert_eq!(
+                d.civil_date_of_mean_time(lon, tz),
+                CalendarDate::new(2024, 3, 11)
+            );
+            // The anchors are then within 12 h of each other.
+            let civil_noon = d.jd0() + 0.5 - tz / 24.0;
+            let mean_noon = d.mean_time_date(lon, tz).local_mean_noon(lon).jd_ut;
+            assert!((civil_noon - mean_noon).abs() < 0.5);
+        }
+        // No shift: London, Ürümqi on Beijing time, Tarawa (UTC+12 at
+        // 173° E), Suva (UTC+12 at 178.4° E), Honolulu, and 180° on UTC-12.
+        for (lon, tz) in [
+            (-0.1276, 0.0),
+            (87.6, 8.0),
+            (172.977, 12.0),
+            (178.44, 12.0),
+            (-157.86, -10.0),
+            (180.0, -12.0),
+        ] {
+            assert_eq!(mean_time_day_shift(lon, tz), 0, "{lon} {tz}");
+            assert_eq!(d.mean_time_date(lon, tz), d);
+            assert_eq!(d.civil_date_of_mean_time(lon, tz), d);
+        }
+        // A civil date behind mean time (173° E kept on UTC-10) maps forward.
+        assert_eq!(mean_time_day_shift(173.0, -10.0), 1);
+        assert_eq!(
+            d.mean_time_date(173.0, -10.0),
+            CalendarDate::new(2024, 3, 11)
+        );
     }
 }
