@@ -17,7 +17,9 @@ use crate::backend::BackendChoice;
 use crate::datetime;
 use crate::tabs::Tab;
 use crate::tabs::calendar::CalendarSettings;
+use crate::tabs::ephemeris::EphemerisSettings;
 use crate::tabs::map::MapSettings;
+use crate::tabs::moon::MoonSettings;
 
 /// eframe storage key for [`Settings`].
 pub const SETTINGS_KEY: &str = "mooncalc.settings";
@@ -37,6 +39,10 @@ pub struct Settings {
     pub view: ViewSettings,
     /// Calendar-tab choices (selected Hijri calendar, month layout).
     pub calendar: CalendarSettings,
+    /// Ephemeris-tab choices (sub-view, table columns and step).
+    pub ephemeris_tab: EphemerisSettings,
+    /// Moon-tab choices (orientation, overlays, crater).
+    pub moon_tab: MoonSettings,
     /// Map-tab display options (resolution, projection, layers, export).
     pub map: MapSettings,
 }
@@ -52,6 +58,8 @@ impl Default for Settings {
             de440_path: String::new(),
             view: ViewSettings::default(),
             calendar: CalendarSettings::default(),
+            ephemeris_tab: EphemerisSettings::default(),
+            moon_tab: MoonSettings::default(),
             map: MapSettings::default(),
         }
     }
@@ -274,6 +282,8 @@ mod tests {
                 calendar_id: "tabular-2-civil".into(),
                 ..CalendarSettings::default()
             },
+            ephemeris_tab: EphemerisSettings::default(),
+            moon_tab: MoonSettings::default(),
             map: MapSettings {
                 cities: true,
                 ..MapSettings::default()

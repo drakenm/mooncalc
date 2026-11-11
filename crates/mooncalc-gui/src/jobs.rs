@@ -351,6 +351,9 @@ where
         parts
     });
     ctx.checkpoint()?;
+    // Workers race to store progress, so a slower one can overwrite a later
+    // fraction with an earlier one; report completion once all have joined.
+    ctx.set_progress(1.0);
     let mut slots: Vec<Option<T>> = std::iter::repeat_with(|| None).take(rows).collect();
     for (row, value) in parts.into_iter().flatten() {
         slots[row] = Some(value);

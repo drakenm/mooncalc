@@ -33,5 +33,7 @@ GitHub issues can't be filed from this environment yet: the `gh` CLI is authenti
 | tauri | Native file pickers for the DE440 path and PNG export (needs `tauri-plugin-dialog`); today the path is typed and PNGs go to the Downloads folder. | app services |
 | app | The report anchors the day at civil noon of a fixed UT offset; derive the offset (with DST) from the city's IANA zone in Rust for historical dates. | app services |
 | tauri | Map evaluation scales about 6x on 24 threads (0.25° world grid, measured while other builds ran); profile per-cell cost and thread scaling on an idle machine. | app services |
+| gui | Ephemeris-tab jobs are keyed on backend choice and path, so `backend::reload()` of the same DE440 file doesn't refresh open views. | gui ephemeris + moon |
+| gui | Moon-tab crater coordinates are rounded (about 0.5°) and mare outlines are schematic. | gui ephemeris + moon |
 | fixtures | Odeh Table VI is missing 159 naked-eye rows (V > 8.18). ICOP records weren't extractable. | validation |
 | licensing | Confirm that committing the Yallop (Crown copyright) and Odeh (Springer) tables as test data is acceptable before the repository goes public. | validation |

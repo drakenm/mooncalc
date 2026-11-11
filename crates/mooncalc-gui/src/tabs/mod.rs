@@ -100,10 +100,11 @@ impl Tabs {
     /// Run every tab's background bookkeeping.
     pub fn poll(&mut self, ctx: &egui::Context, tc: &mut TabContext<'_>) {
         self.map.poll(ctx, tc);
+        self.ephemeris.poll(ctx, tc);
         self.report.poll(ctx, tc);
         self.calendar.poll(ctx, tc);
-        // Placeholder tabs have no background work yet; give them a `poll`
-        // when they gain jobs.
+        // The other tabs compute in `ui`; give them a `poll` if they gain
+        // jobs.
     }
 
     /// Carry out a File-menu action that needs a tab's data.
@@ -142,59 +143,4 @@ impl Tabs {
             Tab::About => self.about.ui(ui, tc),
         }
     }
-}
-
-/// Body of a not-yet-implemented tab: a heading, what is coming, and where
-/// the implementation plugs in.
-pub(crate) fn placeholder(ui: &mut egui::Ui, title: &str, coming: &[&str], plug_in: &str) {
-    ui.heading(title);
-    ui.add_space(4.0);
-    ui.label("Coming soon:");
-    for item in coming {
-        ui.label(format!("  •  {item}"));
-    }
-    ui.add_space(8.0);
-    ui.weak(format!("Implementation hook: {plug_in}"));
-}
-
-/// A summary of the global inputs, shown by placeholder tabs so they visibly
-/// react to the side panel.
-pub(crate) fn inputs_summary(ui: &mut egui::Ui, settings: &Settings) {
-    use crate::datetime::{DateTimeFields, format_utc_offset};
-    use crate::location::format_lat_lon;
-
-    ui.add_space(8.0);
-    egui::CollapsingHeader::new("Current inputs")
-        .default_open(true)
-        .show(ui, |ui| {
-            egui::Grid::new("inputs_summary")
-                .num_columns(2)
-                .show(ui, |ui| {
-                    let t = &settings.time;
-                    ui.label("Date/time (UT)");
-                    ui.monospace(DateTimeFields::from_jd(t.jd_ut).to_string());
-                    ui.end_row();
-                    ui.label(format!("Local ({})", format_utc_offset(t.tz_offset_hours)));
-                    ui.monospace(DateTimeFields::from_jd(t.jd_local()).to_string());
-                    ui.end_row();
-                    let l = &settings.location;
-                    ui.label("Observer");
-                    ui.label(format!(
-                        "{} — {}, {:.0} m",
-                        l.name,
-                        format_lat_lon(l.lat_deg, l.lon_deg),
-                        l.elevation_m
-                    ));
-                    ui.end_row();
-                    ui.label("Criterion");
-                    ui.label(&settings.criterion_id);
-                    ui.end_row();
-                    ui.label("Crescent");
-                    ui.label(settings.crescent.label());
-                    ui.end_row();
-                    ui.label("Ephemeris");
-                    ui.label(settings.backend.effective().label());
-                    ui.end_row();
-                });
-        });
 }
