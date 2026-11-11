@@ -23,6 +23,17 @@
 //!   bright-limb position angle.
 //! * [`meeus`] — the default [`Ephemeris`]: VSOP87D Sun and ELP-2000/82 Moon.
 //!
+//! Lunar events and physical ephemeris (Meeus ch. 27–28, 50–54), each with
+//! a closed-form Meeus series and an ephemeris-agnostic refinement:
+//!
+//! * [`seasons`] — equinoxes, solstices, equation of time.
+//! * [`apsides`] — lunar perigee and apogee.
+//! * [`nodes`] — node passages and maximum declinations.
+//! * [`libration`] — librations, axis position angle, colongitude.
+//! * [`eclipses`] — solar and lunar eclipses, Besselian elements, local
+//!   circumstances.
+//! * [`tables`] — rows for daily/hourly Sun and Moon ephemeris tables.
+//!
 //! The crate has no dependencies and no I/O, threads or clocks in its
 //! default paths, so it builds for `wasm32-unknown-unknown`.
 
@@ -42,6 +53,7 @@ pub mod precession;
 pub mod refraction;
 pub(crate) mod search;
 pub mod seasons;
+pub mod tables;
 pub mod time;
 pub mod topocentric;
 pub mod transform;
