@@ -473,6 +473,49 @@ mod tests {
     }
 
     #[test]
+    fn field_cells_with_a_zone_but_no_finite_value_keep_their_zone() {
+        // The engine gives "moonset after sunset" and "minimum lag" cells
+        // where the Moon does not set zone 0 with value lag = +∞. They must
+        // be drawn in zone 0, not as "no crescent".
+        let mut g = VisibilityGrid::new(-90.0, 90.0, -180.0, 180.0, 10, 20);
+        let mut lag = vec![f32::NAN; 200];
+        for r in 0..10 {
+            for c in 0..20 {
+                if r < 3 {
+                    // Polar band: Moon always up.
+                    g.set(r, c, Some(0));
+                    lag[r * 20 + c] = f32::INFINITY;
+                } else if c < 10 {
+                    g.set(r, c, Some(0));
+                    lag[r * 20 + c] = 30.0;
+                }
+            }
+        }
+        let field = ZoneField {
+            values: &lag,
+            thresholds: &[0.0],
+        };
+        let data = MapData {
+            grid: &g,
+            palette: &[[0, 200, 0], [200, 0, 0]],
+            none_color: Some([40, 40, 40]),
+            field: Some(field),
+        };
+        for antialias in [false, true] {
+            let mut opts = bare(Equirectangular::from_grid(&g).into(), 720, 360);
+            opts.antialias = antialias;
+            let img = render_raster(&data, &opts);
+            let p = &opts.projection;
+            // Inside the Moon-always-up band, and where it meets finite cells.
+            assert_eq!(px(&img, 80.0, 90.0, p), [0, 200, 0, 255], "{antialias}");
+            assert_eq!(px(&img, 63.0, -90.0, p), [0, 200, 0, 255], "{antialias}");
+            // Finite cells and None cells are unchanged.
+            assert_eq!(px(&img, 0.0, -90.0, p), [0, 200, 0, 255], "{antialias}");
+            assert_eq!(px(&img, 0.0, 90.0, p), [40, 40, 40, 255], "{antialias}");
+        }
+    }
+
+    #[test]
     fn degenerate_inputs_do_not_panic() {
         let empty = VisibilityGrid::new(-90.0, 90.0, -180.0, 180.0, 0, 0);
         let one = VisibilityGrid::new(10.0, 20.0, 30.0, 40.0, 1, 1);
