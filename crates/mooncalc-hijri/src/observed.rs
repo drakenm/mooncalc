@@ -4,8 +4,8 @@
 //! [`MonthStartProvider`] and caches the answers. Providers include:
 //!
 //! * crescent visibility at a chosen location under a chosen criterion, or
-//!   MoonCalc-style tri-zonal calendars. These belong to the visibility
-//!   engine (wave 2) and are not implemented here.
+//!   MoonCalc-style regional calendars: `mooncalc_visibility::calendar`,
+//!   built on [`TwentyNinthDayProvider`](crate::chained::TwentyNinthDayProvider).
 //! * [`NewMoonRuleProvider`](crate::newmoon::NewMoonRuleProvider):
 //!   astronomical conjunction plus a rule such as "conjunction before sunset
 //!   at Mecca".
@@ -176,6 +176,9 @@ impl<P: MonthStartProvider> HijriCalendar for ObservedCalendar<P> {
     fn to_hijri(&self, jdn_civil_day: i64) -> Option<HijriDate> {
         // Estimate with the tabular calendar (within a couple of days of any
         // real lunar calendar), then walk to the containing month.
+        if self.range.first_year > self.range.last_year {
+            return None; // an empty range (`clamp` below needs min <= max)
+        }
         let est = TABULAR_II_CIVIL.to_hijri(jdn_civil_day)?;
         // Clamp into the supported range so the walk only queries months the
         // provider is expected to know.
@@ -357,6 +360,17 @@ mod tests {
         assert_eq!(p.month_start(1446, 3), None);
         assert_eq!(p.month_start(1445, 8), None);
         assert_eq!(p.month_start(1445, 13), None);
+    }
+
+    #[test]
+    fn empty_range_converts_nothing() {
+        let cal = ObservedCalendar::new(CalendarProvider(TABULAR_II_CIVIL), "e", "e", 1, 0);
+        assert_eq!(
+            cal.to_hijri(TABULAR_II_CIVIL.month_start(1445, 1).unwrap()),
+            None
+        );
+        assert_eq!(cal.month_start(1445, 1), None);
+        assert_eq!(cal.supported_jdn_range(), None);
     }
 
     #[test]

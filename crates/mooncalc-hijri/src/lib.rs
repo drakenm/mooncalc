@@ -10,8 +10,9 @@
 //!   table for 1300–1600 AH. See [`umalqura`].
 //! * **Observation- or rule-based** calendars built on a
 //!   [`MonthStartProvider`]: crescent visibility (supplied by the visibility
-//!   engine), conjunction rules ([`newmoon`]), or announced dates
-//!   ([`TableProvider`]). See [`observed`].
+//!   engine), conjunction rules ([`newmoon`]), a test on the evening of the
+//!   29th day of each month ([`chained`]: sighting and Umm al-Qura-style
+//!   rules), or announced dates ([`TableProvider`]). See [`observed`].
 //!
 //! [`calendars()`] lists the built-in calendars for a selector, and [`grid`]
 //! builds month views.
@@ -41,6 +42,7 @@
 //! ```
 
 pub mod calendar;
+pub mod chained;
 pub mod civil;
 pub mod date;
 pub mod grid;
@@ -51,6 +53,7 @@ pub mod tabular;
 pub mod umalqura;
 
 pub use calendar::{HijriCalendar, SupportedRange};
+pub use chained::TwentyNinthDayProvider;
 pub use civil::{CivilCalendar, CivilDate};
 pub use date::{HijriDate, HijriMonth, Weekday};
 pub use grid::{GridDay, MonthGrid, civil_month_grid, hijri_month_grid};
