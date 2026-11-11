@@ -103,8 +103,9 @@ impl Tabs {
         self.ephemeris.poll(ctx, tc);
         self.report.poll(ctx, tc);
         self.calendar.poll(ctx, tc);
-        // The other tabs compute in `ui`; give them a `poll` if they gain
-        // jobs.
+        self.sky.poll(ctx, tc);
+        self.trajectory.poll(ctx, tc);
+        // The Moon tab computes in `ui` (one ephemeris row and a raster).
     }
 
     /// Carry out a File-menu action that needs a tab's data.

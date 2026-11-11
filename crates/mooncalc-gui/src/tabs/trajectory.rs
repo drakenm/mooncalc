@@ -12,40 +12,65 @@
 //!
 //! The shown instant follows the app time; the slider moves it within the
 //! local day without touching the app time ("Apply" copies it there), and
-//! **Live** keeps the app time at the current time.
+//! **Live** keeps the app time at the current time (persisted in
+//! [`TrajectorySettings`]).
+//!
+//! The day is computed on a background job ([`crate::jobs`],
+//! cancel-and-replace); a day outside the ephemeris coverage shows a notice
+//! instead.
+
+use std::sync::Arc;
 
 use egui::{Align2, Color32, Pos2, Rect, Sense, Stroke, pos2, vec2};
 use mooncalc_core::Instant;
 use mooncalc_core::angle::DEG;
 use mooncalc_core::events::phases::Phase;
 use mooncalc_core::events::{Circumpolar, DayEvents};
+use serde::{Deserialize, Serialize};
 
 use super::TabContext;
+use super::ephemeris::busy;
+use super::ephemeris::cached::CachedJob;
 use crate::datetime;
 use crate::sky::draw::{self, MOON_PATH, SUN_PATH};
 use crate::sky::geometry::{CompassProjection, compass_point, phase_name, shadow_length};
-use crate::sky::scene::{DAY_SAMPLE_STEP, Day, DayKey, Snapshot, ephemeris};
+use crate::sky::scene::{DAY_SAMPLE_STEP, Day, DayKey, Snapshot};
 use crate::sky::{format_date_hm, format_hm};
+use crate::widgets::coverage::coverage_notice;
 
 /// How often live mode refreshes, seconds.
 const LIVE_REFRESH_S: f32 = 1.0;
+/// Days either side of the local day that its interpolation table spans.
+const DAY_MARGIN_DAYS: f64 = 1.0;
+/// The phases a day lists span from this many days before it ...
+const PHASES_BEFORE_DAYS: f64 = 32.0;
+/// ... to this many after.
+const PHASES_AFTER_DAYS: f64 = 62.0;
 
-/// State of the Trajectory tab (transient).
+/// Persisted options of the Trajectory tab.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TrajectorySettings {
+    /// Keep the app time at the current time while the tab is shown.
+    pub live: bool,
+}
+
+/// State of the Trajectory tab.
 #[derive(Default)]
 pub struct TrajectoryTab {
-    day: Option<Day>,
+    /// The day on screen (the last one computed).
+    day: Option<Arc<Day>>,
+    job: CachedJob<DayKey, Arc<Day>>,
     /// The instant shown, UT JD.
     time: f64,
     /// The app time last seen, to follow its changes.
     last_app_jd: Option<f64>,
-    live: bool,
 }
 
 impl std::fmt::Debug for TrajectoryTab {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TrajectoryTab")
             .field("time", &self.time)
-            .field("live", &self.live)
             .finish_non_exhaustive()
     }
 }
@@ -66,9 +91,19 @@ fn band_color(sun_alt_deg: f64) -> Color32 {
 }
 
 impl TrajectoryTab {
+    /// Adopt a finished day and report a running job.
+    pub fn poll(&mut self, _ctx: &egui::Context, tc: &mut TabContext<'_>) {
+        self.job.poll(tc.status);
+        if let Some(day) = self.job.get()
+            && !self.day.as_ref().is_some_and(|d| Arc::ptr_eq(d, day))
+        {
+            self.day = Some(day.clone());
+        }
+    }
+
     pub fn ui(&mut self, ui: &mut egui::Ui, tc: &mut TabContext<'_>) {
         // Follow the app time; in live mode keep it at "now".
-        if self.live {
+        if tc.settings.trajectory_tab.live {
             let now = datetime::now_jd();
             let minute = datetime::round_to_minute(now);
             if (tc.settings.time.jd_ut - minute).abs() > 1e-9 {
@@ -83,40 +118,65 @@ impl TrajectoryTab {
             self.last_app_jd = Some(tc.settings.time.jd_ut);
         }
         let key = DayKey::new(tc.settings, self.time);
-        if self.day.as_ref().is_none_or(|d| d.key != key) {
-            let eph = ephemeris(tc.settings);
-            self.day = Some(Day::compute(key, eph.as_ref()));
+        let tz = tc.settings.time.tz_offset_hours;
+        let start = key.date.jd0() - key.tz_hours / 24.0;
+        self.controls(ui, tc, start, tz);
+
+        let active = crate::backend::resolve(tc.settings.backend, &tc.settings.de440_path);
+        if let Some(problem) =
+            active.span_problem(start, start + 1.0, DAY_MARGIN_DAYS, DAY_MARGIN_DAYS)
+        {
+            coverage_notice(ui, &problem);
+            return;
         }
-        let Some(day) = self.day.take() else {
+        let eph = active.eph.clone();
+        self.job.request(
+            ui.ctx(),
+            key.clone(),
+            "Computing the Moon's day",
+            move |key, job| {
+                job.checkpoint()?;
+                Ok(Arc::new(Day::compute(key.clone(), eph.as_ref())))
+            },
+        );
+        // The previous day may stand in while the new one is computed, as
+        // long as its interpolation table spans the shown instant.
+        let Some(day) = self.day.clone().filter(|d| {
+            (d.start - DAY_MARGIN_DAYS..=d.start + 1.0 + DAY_MARGIN_DAYS).contains(&self.time)
+        }) else {
+            busy(ui, true);
             return;
         };
-        let tz = tc.settings.time.tz_offset_hours;
-
-        self.controls(ui, tc, &day, tz);
+        if day.key != key {
+            busy(ui, true);
+        }
+        let phases_complete = active
+            .span_problem(start, start + 1.0, PHASES_BEFORE_DAYS, PHASES_AFTER_DAYS)
+            .is_none();
         let snap = day.snapshot(self.time);
 
         let avail = ui.available_size();
         let side = (avail.y * 0.58).clamp(220.0, 520.0).min(avail.x * 0.42);
         ui.horizontal(|ui| {
             let plot_w = (avail.x - side - 2.0 * ui.spacing().item_spacing.x).max(300.0);
-            self.altitude_plot(ui, &day, &snap, tz, vec2(plot_w, side));
+            let live = &mut tc.settings.trajectory_tab.live;
+            self.altitude_plot(ui, &day, &snap, tz, vec2(plot_w, side), live);
             compass(ui, &day, &snap, tz, side);
         });
         ui.add_space(6.0);
-        egui::ScrollArea::vertical().show(ui, |ui| readouts(ui, &day, &snap, tz));
-        self.day = Some(day);
+        egui::ScrollArea::vertical().show(ui, |ui| readouts(ui, &day, &snap, tz, phases_complete));
     }
 
-    fn controls(&mut self, ui: &mut egui::Ui, tc: &mut TabContext<'_>, day: &Day, tz: f64) {
+    fn controls(&mut self, ui: &mut egui::Ui, tc: &mut TabContext<'_>, day_start: f64, tz: f64) {
         ui.horizontal_wrapped(|ui| {
-            ui.toggle_value(&mut self.live, "● Live")
+            ui.toggle_value(&mut tc.settings.trajectory_tab.live, "● Live")
                 .on_hover_text("Keep the app time at the current time");
             if ui.button("« Day").clicked() {
-                self.live = false;
+                tc.settings.trajectory_tab.live = false;
                 self.time -= 1.0;
             }
             if ui.button("Day »").clicked() {
-                self.live = false;
+                tc.settings.trajectory_tab.live = false;
                 self.time += 1.0;
             }
             ui.label(format!(
@@ -139,12 +199,12 @@ impl TrajectoryTab {
             let mut t = self.time;
             ui.spacing_mut().slider_width = (ui.available_width() - 50.0).max(150.0);
             let r = ui.add(
-                egui::Slider::new(&mut t, day.start..=day.start + 1.0 - 1.0 / 1440.0)
+                egui::Slider::new(&mut t, day_start..=day_start + 1.0 - 1.0 / 1440.0)
                     .show_value(false)
                     .smart_aim(false),
             );
             if r.changed() {
-                self.live = false;
+                tc.settings.trajectory_tab.live = false;
                 self.time = t;
             }
             ui.weak("24:00");
@@ -158,6 +218,7 @@ impl TrajectoryTab {
         snap: &Snapshot,
         tz: f64,
         size: egui::Vec2,
+        live: &mut bool,
     ) {
         let (response, painter) = ui.allocate_painter(size, Sense::click_and_drag());
         let outer = response.rect;
@@ -283,7 +344,7 @@ impl TrajectoryTab {
             && (response.clicked() || response.dragged())
             && rect.x_range().contains(p.x)
         {
-            self.live = false;
+            *live = false;
             self.time = jd_of(p.x);
         }
         if let Some(p) = response.hover_pos()
@@ -474,7 +535,7 @@ fn circumpolar_note(ev: &DayEvents, body: &str) -> Option<String> {
     })
 }
 
-fn readouts(ui: &mut egui::Ui, day: &Day, snap: &Snapshot, tz: f64) {
+fn readouts(ui: &mut egui::Ui, day: &Day, snap: &Snapshot, tz: f64, phases_complete: bool) {
     let shadow = |alt: f64| match shadow_length(1.0, alt) {
         Some(l) if l < 1000.0 => format!("{l:.2} m"),
         Some(_) => "> 1 km".to_owned(),
@@ -566,5 +627,66 @@ fn readouts(ui: &mut egui::Ui, day: &Day, snap: &Snapshot, tz: f64) {
             day.ephemeris_name,
             (DAY_SAMPLE_STEP * 1440.0).round()
         ));
+        if !phases_complete {
+            ui.weak(
+                "The new and full Moons and the age near this date reach beyond the ephemeris \
+                 coverage; those outside it are not listed.",
+            );
+        }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::settings::Settings;
+    use crate::status::StatusInfo;
+    use std::time::{Duration, Instant as Clock};
+
+    fn frame(ctx: &egui::Context, tab: &mut TrajectoryTab, settings: &mut Settings) {
+        let mut status = StatusInfo::default();
+        let input = egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1200.0, 800.0))),
+            ..Default::default()
+        };
+        let mut out = ctx.run_ui(input, |ui| {
+            let mut tc = TabContext {
+                settings,
+                status: &mut status,
+            };
+            tab.poll(ui.ctx(), &mut tc);
+            tab.ui(ui, &mut tc);
+        });
+        out.textures_delta.clear();
+    }
+
+    #[test]
+    fn the_day_is_computed_in_the_background() {
+        let ctx = egui::Context::default();
+        let mut settings = Settings::default();
+        settings.time.tz_offset_hours = 0.0;
+        settings.time.jd_ut = crate::datetime::calendar_to_jd(2024, 3, 11.0) + 0.5;
+        let mut tab = TrajectoryTab::default();
+        let start = Clock::now();
+        while tab.day.is_none() {
+            assert!(start.elapsed() < Duration::from_secs(60), "never computed");
+            frame(&ctx, &mut tab, &mut settings);
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let day = tab.day.clone().unwrap();
+        assert_eq!(day.key, DayKey::new(&settings, settings.time.jd_ut));
+        assert_eq!(day.samples.len(), 289);
+    }
+
+    #[test]
+    fn a_day_outside_the_coverage_starts_no_job() {
+        let ctx = egui::Context::default();
+        let mut settings = Settings::default();
+        settings.time.jd_ut = crate::datetime::calendar_to_jd(-2500, 1, 1.0);
+        let mut tab = TrajectoryTab::default();
+        for _ in 0..3 {
+            frame(&ctx, &mut tab, &mut settings);
+        }
+        assert!(!tab.job.is_running() && tab.day.is_none());
+    }
 }

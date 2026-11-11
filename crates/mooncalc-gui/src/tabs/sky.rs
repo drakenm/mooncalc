@@ -15,7 +15,13 @@
 //!   Moon and the bright stars of date.
 //!
 //! The local date and the evening/morning choice come from the global
-//! inputs; times are shown in the app's time zone.
+//! inputs; times are shown in the app's time zone. The night is computed on
+//! a background job ([`crate::jobs`], cancel-and-replace on new inputs);
+//! the previous night stays on screen until the new one arrives. A date
+//! outside the ephemeris coverage shows a notice instead. The view options
+//! persist in [`SkySettings`].
+
+use std::sync::Arc;
 
 use egui::{Align2, Color32, Pos2, Rect, Sense, Stroke, pos2, vec2};
 use mooncalc_core::angle::{DEG, norm_2pi, separation};
@@ -27,19 +33,22 @@ use mooncalc_core::transform::{
 };
 use mooncalc_core::{Ecliptic, Equatorial, Horizontal, Instant};
 use mooncalc_visibility::circumstances::{Outcome, Polar};
+use serde::{Deserialize, Serialize};
 
-use super::TabContext;
+use super::ephemeris::cached::CachedJob;
+use super::{Tab, TabContext};
 use crate::settings::Crescent;
 use crate::sky::draw::{self, MOON_PATH, SUN_PATH};
 use crate::sky::geometry::{
     AllSkyProjection, HorizonProjection, StarChartProjection, compass_point, limb_direction,
     phase_name, sky_color, star_visibility,
 };
-use crate::sky::scene::{ATMOSPHERE, Night, NightKey, Snapshot, ephemeris};
+use crate::sky::scene::{ATMOSPHERE, Night, NightKey, Snapshot, civil_noon, ephemeris};
 use crate::sky::{format_date_hm, format_hm};
+use crate::widgets::coverage::coverage_notice;
 
 /// The three views.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum SkyView {
     #[default]
     Horizon,
@@ -68,29 +77,82 @@ const DEFAULT_DISC_SCALE: f32 = 6.0;
 /// Default star-chart scale, pixels per degree.
 const DEFAULT_CHART_PX_PER_DEG: f32 = 6.0;
 
-/// State of the Sky tab (transient).
+/// Days around civil noon that a night needs from the ephemeris: its
+/// interpolation table spans ±2 d (the conjunction's look-around is checked
+/// by the circumstances, which report `OutsideEphemeris`).
+const NIGHT_MARGIN_DAYS: f64 = 2.0;
+
+/// Persisted view options of the Sky tab.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SkySettings {
+    pub view: SkyView,
+    /// Horizon view: azimuth span (zoom), degrees.
+    pub span_deg: f32,
+    /// Magnification of the Sun and Moon discs (1 = true size).
+    pub disc_scale: f32,
+    /// Star chart scale, pixels per degree.
+    pub chart_px_per_deg: f32,
+    pub show_paths: bool,
+    pub show_stars: bool,
+    pub show_labels: bool,
+    /// Playback speed, sky minutes per second.
+    pub speed_min_per_s: f32,
+}
+
+impl Default for SkySettings {
+    fn default() -> Self {
+        Self {
+            view: SkyView::Horizon,
+            span_deg: DEFAULT_SPAN_DEG,
+            disc_scale: DEFAULT_DISC_SCALE,
+            chart_px_per_deg: DEFAULT_CHART_PX_PER_DEG,
+            show_paths: true,
+            show_stars: true,
+            show_labels: true,
+            speed_min_per_s: 10.0,
+        }
+    }
+}
+
+impl SkySettings {
+    /// Clamp values from an edited or old settings file into the ranges
+    /// the controls offer.
+    fn sanitized(mut self) -> Self {
+        let fix = |v: f32, lo: f32, hi: f32, default: f32| {
+            if v.is_finite() {
+                v.clamp(lo, hi)
+            } else {
+                default
+            }
+        };
+        self.span_deg = fix(self.span_deg, 10.0, 360.0, DEFAULT_SPAN_DEG);
+        self.disc_scale = fix(self.disc_scale, 1.0, 30.0, DEFAULT_DISC_SCALE);
+        self.chart_px_per_deg = fix(self.chart_px_per_deg, 1.5, 40.0, DEFAULT_CHART_PX_PER_DEG);
+        if !SPEEDS.contains(&self.speed_min_per_s) {
+            self.speed_min_per_s = 10.0;
+        }
+        self
+    }
+}
+
+/// State of the Sky tab. View options live in [`SkySettings`]; `opts` is
+/// this frame's copy.
 pub struct SkyTab {
-    night: Option<Night>,
-    view: SkyView,
+    /// The night on screen (the last one computed).
+    night: Option<Arc<Night>>,
+    job: CachedJob<NightKey, Arc<Night>>,
+    opts: SkySettings,
     /// The instant shown, UT JD.
     time: f64,
     playing: bool,
-    speed_min_per_s: f32,
     last_tick: Option<f64>,
-    /// Horizon view: azimuth span (zoom), degrees.
-    span_deg: f32,
     /// Horizon view: pan from the automatic centre, degrees.
     az_offset_deg: f32,
     alt_offset_deg: f32,
     /// Automatic centre azimuth of the horizon view, radians.
     auto_center_az: f64,
-    /// Magnification of the Sun and Moon discs (1 = true size).
-    disc_scale: f32,
-    show_paths: bool,
-    show_stars: bool,
-    show_labels: bool,
-    /// Star chart: scale and centre (`None` follows the Moon).
-    chart_px_per_deg: f32,
+    /// Star chart centre (`None` follows the Moon).
     chart_center: Option<(f64, f64)>,
 }
 
@@ -98,20 +160,14 @@ impl Default for SkyTab {
     fn default() -> Self {
         Self {
             night: None,
-            view: SkyView::Horizon,
+            job: CachedJob::default(),
+            opts: SkySettings::default(),
             time: 0.0,
             playing: false,
-            speed_min_per_s: 10.0,
             last_tick: None,
-            span_deg: DEFAULT_SPAN_DEG,
             az_offset_deg: 0.0,
             alt_offset_deg: 0.0,
             auto_center_az: 270.0 * DEG,
-            disc_scale: DEFAULT_DISC_SCALE,
-            show_paths: true,
-            show_stars: true,
-            show_labels: true,
-            chart_px_per_deg: DEFAULT_CHART_PX_PER_DEG,
             chart_center: None,
         }
     }
@@ -120,10 +176,21 @@ impl Default for SkyTab {
 impl std::fmt::Debug for SkyTab {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SkyTab")
-            .field("view", &self.view)
+            .field("view", &self.opts.view)
             .field("time", &self.time)
             .finish_non_exhaustive()
     }
+}
+
+/// The coverage problem of the night for `key`, if any.
+fn coverage_problem(key: &NightKey, settings: &crate::settings::Settings) -> Option<String> {
+    let noon = civil_noon(key.date, key.tz_hours);
+    crate::backend::resolve(settings.backend, &settings.de440_path).span_problem(
+        noon,
+        noon,
+        NIGHT_MARGIN_DAYS,
+        NIGHT_MARGIN_DAYS,
+    )
 }
 
 /// Circular mean of two azimuths, radians.
@@ -132,19 +199,31 @@ fn mean_azimuth(a: f64, b: f64) -> f64 {
 }
 
 impl SkyTab {
-    /// Select a view (e.g. from a menu or a preview harness).
-    pub fn set_view(&mut self, view: SkyView) {
-        self.view = view;
+    /// Start computing the night for the current inputs while the tab is
+    /// visible; adopt a finished night.
+    pub fn poll(&mut self, ctx: &egui::Context, tc: &mut TabContext<'_>) {
+        if tc.settings.view.active_tab == Tab::Sky {
+            let key = NightKey::from_settings(tc.settings);
+            if coverage_problem(&key, tc.settings).is_none() {
+                let eph = ephemeris(tc.settings);
+                self.job
+                    .request(ctx, key, "Computing the sky", move |key, job| {
+                        job.checkpoint()?;
+                        Ok(Arc::new(Night::compute(key.clone(), eph.as_ref())))
+                    });
+            }
+        }
+        self.job.poll(tc.status);
+        if let Some(night) = self.job.get()
+            && !self.night.as_ref().is_some_and(|n| Arc::ptr_eq(n, night))
+        {
+            let night = night.clone();
+            self.adopt(night);
+        }
     }
 
-    /// Recompute the night when the inputs change.
-    fn refresh(&mut self, tc: &mut TabContext<'_>) {
-        let key = NightKey::from_settings(tc.settings);
-        if self.night.as_ref().is_some_and(|n| n.key == key) {
-            return;
-        }
-        let eph = ephemeris(tc.settings);
-        let night = Night::compute(key, eph.as_ref());
+    /// Show a newly computed night, from its default instant.
+    fn adopt(&mut self, night: Arc<Night>) {
         self.time = night.default_time();
         let s = night.snapshot(self.time);
         self.auto_center_az = if s.moon.alt > -10.0 * DEG {
@@ -160,20 +239,42 @@ impl SkyTab {
     }
 
     pub fn ui(&mut self, ui: &mut egui::Ui, tc: &mut TabContext<'_>) {
-        self.refresh(tc);
+        self.opts = tc.settings.sky_tab.clone().sanitized();
+        self.ui_inner(ui, tc);
+        if tc.settings.sky_tab != self.opts {
+            tc.settings.sky_tab = self.opts.clone();
+        }
+    }
+
+    fn ui_inner(&mut self, ui: &mut egui::Ui, tc: &mut TabContext<'_>) {
         let tz = tc.settings.time.tz_offset_hours;
-        let Some(night) = self.night.take() else {
+        let key = NightKey::from_settings(tc.settings);
+        self.controls(ui);
+        if let Some(problem) = coverage_problem(&key, tc.settings) {
+            coverage_notice(ui, &format!("{}: {problem}", key.date_label()));
+            return;
+        }
+        let Some(night) = self.night.clone() else {
+            super::ephemeris::busy(ui, true);
             return;
         };
-
-        self.controls(ui);
-        summary_line(ui, &night, tz, tc.settings.crescent);
+        if night.key != key {
+            ui.horizontal(|ui| {
+                ui.spinner();
+                ui.weak(format!(
+                    "Computing the {} … (showing the {})",
+                    key.date_label().to_lowercase(),
+                    night.key.date_label().to_lowercase()
+                ));
+            });
+        }
+        summary_line(ui, &night, tz, night.key.crescent);
 
         // Playback.
         if self.playing {
             let now = ui.input(|i| i.time);
             if let Some(last) = self.last_tick {
-                self.time += (now - last) * f64::from(self.speed_min_per_s) / 1440.0;
+                self.time += (now - last) * f64::from(self.opts.speed_min_per_s) / 1440.0;
                 if self.time > night.end {
                     self.time = night.start;
                 }
@@ -190,48 +291,47 @@ impl SkyTab {
         let (response, painter) = ui.allocate_painter(size, Sense::click_and_drag());
         let rect = response.rect;
         let snap = night.snapshot(self.time);
-        match self.view {
+        match self.opts.view {
             SkyView::Horizon => self.horizon_view(ui, &painter, &response, &night, &snap, tz),
             SkyView::AllSky => self.all_sky_view(&painter, &response, &night, &snap),
             SkyView::StarChart => self.star_chart_view(ui, &painter, &response, &night, &snap),
         }
-        if self.view != SkyView::StarChart {
+        if self.opts.view != SkyView::StarChart {
             self.readout_box(&painter, rect, &night, &snap, tz);
         }
 
         self.time_controls(ui, &night, tz);
-        self.night = Some(night);
     }
 
     fn controls(&mut self, ui: &mut egui::Ui) {
         ui.horizontal_wrapped(|ui| {
             for v in SkyView::ALL {
-                ui.selectable_value(&mut self.view, v, v.label());
+                ui.selectable_value(&mut self.opts.view, v, v.label());
             }
             ui.separator();
-            if self.view == SkyView::Horizon {
+            if self.opts.view == SkyView::Horizon {
                 ui.label("Span");
                 ui.add(
-                    egui::Slider::new(&mut self.span_deg, 20.0..=360.0)
+                    egui::Slider::new(&mut self.opts.span_deg, 20.0..=360.0)
                         .suffix("°")
                         .logarithmic(true),
                 );
             }
-            if self.view == SkyView::StarChart {
+            if self.opts.view == SkyView::StarChart {
                 ui.label("Scale");
                 ui.add(
-                    egui::Slider::new(&mut self.chart_px_per_deg, 1.5..=40.0)
+                    egui::Slider::new(&mut self.opts.chart_px_per_deg, 1.5..=40.0)
                         .suffix(" px/°")
                         .logarithmic(true),
                 );
             } else {
                 ui.label("Discs ×");
-                ui.add(egui::Slider::new(&mut self.disc_scale, 1.0..=30.0).logarithmic(true))
+                ui.add(egui::Slider::new(&mut self.opts.disc_scale, 1.0..=30.0).logarithmic(true))
                     .on_hover_text("Magnification of the Sun's and Moon's discs (1 = true size)");
             }
-            ui.checkbox(&mut self.show_paths, "Paths");
-            ui.checkbox(&mut self.show_stars, "Stars");
-            ui.checkbox(&mut self.show_labels, "Labels");
+            ui.checkbox(&mut self.opts.show_paths, "Paths");
+            ui.checkbox(&mut self.opts.show_stars, "Stars");
+            ui.checkbox(&mut self.opts.show_labels, "Labels");
             if ui.button("Reset view").clicked() {
                 self.reset_view();
             }
@@ -239,11 +339,11 @@ impl SkyTab {
     }
 
     fn reset_view(&mut self) {
-        self.span_deg = DEFAULT_SPAN_DEG;
+        self.opts.span_deg = DEFAULT_SPAN_DEG;
         self.az_offset_deg = 0.0;
         self.alt_offset_deg = 0.0;
         self.chart_center = None;
-        self.chart_px_per_deg = DEFAULT_CHART_PX_PER_DEG;
+        self.opts.chart_px_per_deg = DEFAULT_CHART_PX_PER_DEG;
     }
 
     fn time_controls(&mut self, ui: &mut egui::Ui, night: &Night, tz: f64) {
@@ -258,10 +358,14 @@ impl SkyTab {
             }
             egui::ComboBox::from_id_salt("sky_speed")
                 .width(80.0)
-                .selected_text(format!("{} min/s", self.speed_min_per_s))
+                .selected_text(format!("{} min/s", self.opts.speed_min_per_s))
                 .show_ui(ui, |ui| {
                     for s in SPEEDS {
-                        ui.selectable_value(&mut self.speed_min_per_s, s, format!("{s} min/s"));
+                        ui.selectable_value(
+                            &mut self.opts.speed_min_per_s,
+                            s,
+                            format!("{s} min/s"),
+                        );
                     }
                 });
             ui.monospace(format_hm(self.time, tz));
@@ -324,10 +428,10 @@ impl SkyTab {
             let (scroll, pinch) = ui.input(|i| (i.smooth_scroll_delta.y, i.zoom_delta()));
             let factor = (-scroll / 300.0).exp() / pinch;
             if (factor - 1.0).abs() > 1e-4 {
-                self.span_deg = (self.span_deg * factor).clamp(10.0, 360.0);
+                self.opts.span_deg = (self.opts.span_deg * factor).clamp(10.0, 360.0);
             }
         }
-        let px_per_deg = rect.width() / self.span_deg;
+        let px_per_deg = rect.width() / self.opts.span_deg;
         if response.dragged() {
             let d = response.drag_delta();
             self.az_offset_deg -= d.x / px_per_deg;
@@ -337,7 +441,7 @@ impl SkyTab {
         if response.double_clicked() {
             self.reset_view();
         }
-        let px_per_deg = rect.width() / self.span_deg;
+        let px_per_deg = rect.width() / self.opts.span_deg;
         let proj = HorizonProjection {
             center_az: self.auto_center_az + f64::from(self.az_offset_deg) * DEG,
             center_x: rect.center().x,
@@ -385,7 +489,7 @@ impl SkyTab {
         }
 
         // Stars.
-        if self.show_stars {
+        if self.opts.show_stars {
             let alpha = star_visibility(sun_alt_deg);
             if alpha > 0.02 {
                 for s in &night.stars {
@@ -396,7 +500,7 @@ impl SkyTab {
                     let p = proj.project(h.alt, h.az);
                     if rect.contains(p) {
                         draw::star(painter, p, s.star.vmag, s.star.bv, alpha);
-                        if self.show_labels && s.star.vmag < 1.6 {
+                        if self.opts.show_labels && s.star.vmag < 1.6 {
                             draw::label(
                                 painter,
                                 p + vec2(5.0, 0.0),
@@ -412,7 +516,7 @@ impl SkyTab {
         }
 
         // Paths and 10-minute dots.
-        if self.show_paths {
+        if self.opts.show_paths {
             let max_jump = rect.width() * 0.5;
             let path = |state: fn(&Snapshot) -> (f64, f64)| -> Vec<(Pos2, bool)> {
                 night
@@ -455,7 +559,7 @@ impl SkyTab {
         let sun_p = proj.project(snap.sun.alt, snap.sun.az);
         let moon_p = proj.project(snap.moon.alt, snap.moon.az);
         let sun_r = ((sun_semidiameter(snap.sun.topo.distance_km) / DEG * deg_px) as f32
-            * self.disc_scale)
+            * self.opts.disc_scale)
             .max(5.0);
         if let Some(g) = night.geometry(self.time)
             && rect.contains(sun_p.clamp(rect.min, rect.max))
@@ -488,8 +592,8 @@ impl SkyTab {
 
         // The Sun and the Moon.
         draw::sun(painter, sun_p, sun_r, snap.sun.alt < 0.0);
-        let moon_r =
-            (moon_semidiameter(snap.moon.topo.distance_km) / DEG * deg_px) as f32 * self.disc_scale;
+        let moon_r = (moon_semidiameter(snap.moon.topo.distance_km) / DEG * deg_px) as f32
+            * self.opts.disc_scale;
         let limb = limb_direction(proj.zenith_direction(), snap.limb_zenith);
         draw::moon(
             painter,
@@ -498,7 +602,7 @@ impl SkyTab {
             snap.illumination.fraction,
             limb,
         );
-        if self.show_labels {
+        if self.opts.show_labels {
             draw::label(
                 painter,
                 moon_p + vec2(moon_r.max(4.0) + 6.0, -moon_r.max(4.0) - 2.0),
@@ -548,7 +652,7 @@ impl SkyTab {
         let mut k = (((first + tz_days) / STEP).round() as i64).rem_euclid(144);
         while t <= p1 {
             let s = night.snapshot(t);
-            let labelled = self.show_labels && k % label_every == 0;
+            let labelled = self.opts.show_labels && k % label_every == 0;
             for (alt, az, color) in [
                 (s.sun.alt, s.sun.az, SUN_PATH),
                 (s.moon.alt, s.moon.az, MOON_PATH),
@@ -626,7 +730,7 @@ impl SkyTab {
             );
         }
 
-        if self.show_stars {
+        if self.opts.show_stars {
             let alpha = star_visibility(sun_alt_deg);
             if alpha > 0.02 {
                 for s in &night.stars {
@@ -636,7 +740,7 @@ impl SkyTab {
                     }
                     let p = proj.project(h.alt, h.az);
                     draw::star(painter, p, s.star.vmag, s.star.bv, alpha);
-                    if self.show_labels && s.star.vmag < 1.3 {
+                    if self.opts.show_labels && s.star.vmag < 1.3 {
                         draw::label(
                             painter,
                             p + vec2(5.0, 0.0),
@@ -673,7 +777,7 @@ impl SkyTab {
             radius,
         );
 
-        if self.show_paths {
+        if self.opts.show_paths {
             let pts = |f: fn(&Snapshot) -> (f64, f64)| -> Vec<(Pos2, bool)> {
                 night
                     .samples
@@ -702,13 +806,13 @@ impl SkyTab {
         let sun_p = proj.project(snap.sun.alt, snap.sun.az);
         if rect.contains(sun_p) {
             let r = (sun_semidiameter(snap.sun.topo.distance_km) / DEG * px_per_deg) as f32
-                * self.disc_scale;
+                * self.opts.disc_scale;
             draw::sun(painter, sun_p, r.max(5.0), snap.sun.alt < 0.0);
         }
         let moon_p = proj.project(snap.moon.alt, snap.moon.az);
         if rect.contains(moon_p) {
             let r = ((moon_semidiameter(snap.moon.topo.distance_km) / DEG * px_per_deg) as f32
-                * self.disc_scale)
+                * self.opts.disc_scale)
                 .max(5.0);
             let limb = limb_direction(proj.zenith_direction(moon_p), snap.limb_zenith);
             draw::moon(painter, moon_p, r, snap.illumination.fraction, limb);
@@ -728,14 +832,14 @@ impl SkyTab {
             let (scroll, pinch) = ui.input(|i| (i.smooth_scroll_delta.y, i.zoom_delta()));
             let factor = (scroll / 300.0).exp() * pinch;
             if (factor - 1.0).abs() > 1e-4 {
-                self.chart_px_per_deg = (self.chart_px_per_deg * factor).clamp(1.5, 40.0);
+                self.opts.chart_px_per_deg = (self.opts.chart_px_per_deg * factor).clamp(1.5, 40.0);
             }
         }
         let (mut ra0, mut dec0) = self.chart_center.unwrap_or((
             snap.moon.topo.ra,
             snap.moon.topo.dec.clamp(-60.0 * DEG, 60.0 * DEG),
         ));
-        let px_per_rad = self.chart_px_per_deg / DEG as f32;
+        let px_per_rad = self.opts.chart_px_per_deg / DEG as f32;
         if response.dragged() {
             let d = response.drag_delta();
             ra0 = norm_2pi(ra0 + f64::from(d.x / px_per_rad));
@@ -756,7 +860,11 @@ impl SkyTab {
 
         // Grid: RA hours and Dec every 10° (or 30° when zoomed out).
         let grid = Stroke::new(0.5, Color32::from_white_alpha(30));
-        let dec_step = if self.chart_px_per_deg < 3.0 { 30 } else { 10 };
+        let dec_step = if self.opts.chart_px_per_deg < 3.0 {
+            30
+        } else {
+            10
+        };
         for h in 0..24 {
             let ra = f64::from(h) * 15.0 * DEG;
             let x = proj.project(ra, 0.0).x;
@@ -829,19 +937,19 @@ impl SkyTab {
             max_jump,
         );
 
-        if self.show_stars {
+        if self.opts.show_stars {
             for s in &night.stars {
                 let p = proj.project(s.ra, s.dec);
                 if !rect.contains(p) {
                     continue;
                 }
                 draw::star(&painter, p, s.star.vmag, s.star.bv, 1.0);
-                let limit = if self.chart_px_per_deg > 12.0 {
+                let limit = if self.opts.chart_px_per_deg > 12.0 {
                     3.5
                 } else {
                     1.6
                 };
-                if self.show_labels && s.star.vmag < limit {
+                if self.opts.show_labels && s.star.vmag < limit {
                     draw::label(
                         &painter,
                         p + vec2(5.0, 0.0),
@@ -853,7 +961,7 @@ impl SkyTab {
                 }
             }
         }
-        if self.show_paths {
+        if self.opts.show_paths {
             let pts = |f: fn(&Snapshot) -> (f64, f64)| -> Vec<(Pos2, bool)> {
                 night
                     .samples
@@ -877,13 +985,13 @@ impl SkyTab {
                 max_jump,
             );
         }
-        let deg_px = f64::from(self.chart_px_per_deg);
+        let deg_px = f64::from(self.opts.chart_px_per_deg);
         let sun_p = proj.project(snap.sun.topo.ra, snap.sun.topo.dec);
         let sun_r = (sun_semidiameter(snap.sun.topo.distance_km) / DEG * deg_px) as f32;
         draw::sun(
             &painter,
             sun_p,
-            (sun_r * self.disc_scale.min(3.0)).max(6.0),
+            (sun_r * self.opts.disc_scale.min(3.0)).max(6.0),
             false,
         );
         let moon_p = proj.project(snap.moon.topo.ra, snap.moon.topo.dec);
@@ -891,7 +999,7 @@ impl SkyTab {
             ((moon_semidiameter(snap.moon.topo.distance_km) / DEG * deg_px) as f32 * 3.0).max(7.0);
         let limb = limb_direction(proj.north_direction(), snap.illumination.bright_limb_angle);
         draw::moon(&painter, moon_p, moon_r, snap.illumination.fraction, limb);
-        if self.show_labels {
+        if self.opts.show_labels {
             draw::label(
                 &painter,
                 sun_p + vec2(9.0, 0.0),
@@ -1201,5 +1309,108 @@ impl NightKey {
             self.date.month,
             self.date.day
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::settings::Settings;
+    use crate::status::StatusInfo;
+    use std::time::{Duration, Instant as Clock};
+
+    /// One headless egui frame of the Sky tab (visible).
+    fn frame(ctx: &egui::Context, tab: &mut SkyTab, settings: &mut Settings) {
+        let mut status = StatusInfo::default();
+        let input = egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1200.0, 800.0))),
+            ..Default::default()
+        };
+        let mut out = ctx.run_ui(input, |ui| {
+            let mut tc = TabContext {
+                settings,
+                status: &mut status,
+            };
+            tab.poll(ui.ctx(), &mut tc);
+            tab.ui(ui, &mut tc);
+        });
+        out.textures_delta.clear();
+    }
+
+    fn mecca_2024_03_11() -> Settings {
+        let mut s = Settings::default();
+        s.view.active_tab = Tab::Sky;
+        s.time.tz_offset_hours = 3.0;
+        s.time.jd_ut = crate::datetime::calendar_to_jd(2024, 3, 11.0) + 0.5;
+        s
+    }
+
+    #[test]
+    fn the_night_is_computed_in_the_background_and_adopted() {
+        let ctx = egui::Context::default();
+        let mut settings = mecca_2024_03_11();
+        settings.sky_tab.view = SkyView::AllSky;
+        let mut tab = SkyTab::default();
+        let start = Clock::now();
+        while tab.night.is_none() {
+            assert!(start.elapsed() < Duration::from_secs(60), "never computed");
+            frame(&ctx, &mut tab, &mut settings);
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let night = tab.night.clone().unwrap();
+        assert_eq!(night.key, NightKey::from_settings(&settings));
+        assert!(matches!(night.outcome, Outcome::Crescent(_)));
+        assert_eq!(tab.time, night.default_time());
+        // The persisted view option reached the tab.
+        assert_eq!(tab.opts.view, SkyView::AllSky);
+
+        // A new date: the old night stays until the new one arrives.
+        settings.time.jd_ut += 1.0;
+        frame(&ctx, &mut tab, &mut settings);
+        assert!(tab.night.is_some());
+        while tab.night.as_ref().unwrap().key != NightKey::from_settings(&settings) {
+            assert!(
+                start.elapsed() < Duration::from_secs(60),
+                "never recomputed"
+            );
+            frame(&ctx, &mut tab, &mut settings);
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    #[test]
+    fn a_date_outside_the_coverage_starts_no_job() {
+        // Meeus covers −2000 to 3000.
+        let ctx = egui::Context::default();
+        let mut settings = mecca_2024_03_11();
+        settings.time.jd_ut = crate::datetime::calendar_to_jd(3500, 1, 1.0);
+        let key = NightKey::from_settings(&settings);
+        let problem = coverage_problem(&key, &settings).unwrap();
+        assert!(problem.contains("outside the Meeus coverage"), "{problem}");
+        let mut tab = SkyTab::default();
+        for _ in 0..3 {
+            frame(&ctx, &mut tab, &mut settings);
+        }
+        assert!(!tab.job.is_running() && tab.night.is_none());
+    }
+
+    #[test]
+    fn options_are_sanitized_and_persist_without_their_fields() {
+        let s = SkySettings {
+            span_deg: f32::NAN,
+            disc_scale: 1000.0,
+            chart_px_per_deg: 0.0,
+            speed_min_per_s: 7.0,
+            ..SkySettings::default()
+        }
+        .sanitized();
+        assert_eq!(s.span_deg, DEFAULT_SPAN_DEG);
+        assert_eq!(s.disc_scale, 30.0);
+        assert_eq!(s.chart_px_per_deg, 1.5);
+        assert_eq!(s.speed_min_per_s, 10.0);
+        let old: SkySettings = serde_json::from_str(r#"{"view":"StarChart"}"#).unwrap();
+        assert_eq!(old.view, SkyView::StarChart);
+        assert_eq!(old.span_deg, DEFAULT_SPAN_DEG);
+        assert!(old.show_stars);
     }
 }
