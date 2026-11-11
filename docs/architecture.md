@@ -13,8 +13,8 @@ MoonCalc-rs is a Rust rewrite of Dr. Monzur Ahmed's MoonCalc 6.0, a closed-sourc
 | `mooncalc-atlas` | Embedded GeoNames city atlas with search. |
 | `mooncalc-spk` | JPL SPK/DAF reader and the DE440 `Ephemeris` backend. Only compiled into the GUI with `--features de440`. |
 | `mooncalc-gui` | The egui/eframe desktop app, binary `mooncalc`. |
-| `mooncalc-tauri` | Tauri 2 desktop shell, binary `mooncalc-tauri`. It exposes the library crates as Tauri commands to the TypeScript frontend in `frontend/tauri/`. |
-| `mooncalc-app` (wave 2) | Application services shared by every frontend: high-level operations such as "compute visibility map", "location report" and "ephemeris table", returning serde DTOs. egui, Tauri and WASM all call this layer, so no logic is duplicated. |
+| `mooncalc-tauri` | Tauri 2 desktop shell, binary `mooncalc-tauri`. It exposes the `mooncalc-app` services as Tauri commands to the TypeScript frontend in `frontend/tauri/`, adding threads (map rows in parallel), timing and DE440 loading by path. |
+| `mooncalc-app` | Application services shared by every frontend, from request DTO to response DTO (serde, camelCase JSON): ephemeris selection (Meeus truncated/full, DE440 behind the `de440` feature), criteria with legends, visibility maps (prepare → evaluate row blocks → assemble, so callers parallelise; PNG export), the location report under every criterion, atlas search, the earliest-sighting scan and simplified base-map polylines. Portable (builds for `wasm32-unknown-unknown`): no threads, clocks or file I/O in default paths. The Tauri shell uses it; the egui GUI and the WASM bindings are to follow. |
 | `mooncalc-wasm` (planned release) | `wasm-bindgen` bindings over `mooncalc-app` for a browser TypeScript frontend in `frontend/web/`. |
 
 Dependency direction: `core` ← `visibility` ← `maps`, and `core` ← `hijri`, `atlas`, `spk`. The frontends (`gui`, `tauri`, later `wasm`) depend on everything. Library crates never depend on egui or Tauri.
@@ -27,7 +27,7 @@ Dependency direction: `core` ← `visibility` ← `maps`, and `core` ← `hijri`
 | Tauri + TypeScript (`mooncalc-tauri`, `frontend/tauri/`) | Built alongside egui | Vite + TypeScript UI in a webview. Heavy computation stays in Rust, behind Tauri commands. |
 | TypeScript + WASM (`mooncalc-wasm`, `frontend/web/`) | Planned release addition | The same computations compiled to `wasm32-unknown-unknown` and run in the browser, with grids evaluated in Web Workers. |
 
-**Portability rule (enables WASM):** `mooncalc-core`, `mooncalc-visibility`, `mooncalc-maps`, `mooncalc-hijri` and `mooncalc-atlas` must build for `wasm32-unknown-unknown`. That means no `std::fs`, `std::thread` or `std::time::SystemTime::now` in their default code paths. Put file I/O behind APIs that accept bytes or strings (callers do the reading), and leave parallelism to the caller. Check with `cargo build --target wasm32-unknown-unknown -p <crate>`; the target is installed.
+**Portability rule (enables WASM):** `mooncalc-core`, `mooncalc-visibility`, `mooncalc-maps`, `mooncalc-hijri`, `mooncalc-atlas` and `mooncalc-app` must build for `wasm32-unknown-unknown`. That means no `std::fs`, `std::thread` or `std::time::SystemTime::now` in their default code paths. Put file I/O behind APIs that accept bytes or strings (callers do the reading), and leave parallelism to the caller. Check with `cargo build --target wasm32-unknown-unknown -p <crate>`; the target is installed.
 
 ## Conventions
 

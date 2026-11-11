@@ -19,6 +19,10 @@ GitHub issues can't be filed from this environment yet: the `gh` CLI is authenti
 | core | The backends disagree on `Ephemeris::distance_km`: Meeus gives geometric distance, DE440 the light-time range (up to 40 km apart, about 0.35″ of parallax). Pick one convention, geometric preferred, and document it on the trait. | core validation |
 | core | ΔT beyond 2026.75 is an extrapolation; refresh the observed table from IERS periodically. | core validation |
 | gui | Arabic month names need a bundled Arabic font plus text shaping in egui. | gui calendar |
-| tauri | The mock backend duplicates the Rust stubs, and the fallback legend colours may differ from the criteria colours. Both resolve when `mooncalc-app` lands. | tauri-shell |
+| gui | Switch the egui GUI onto `mooncalc-app` (its Map/Report tabs call the library crates directly), so both desktop frontends share the services. | app services |
+| app | A 0.25° map with values is about 4.2 MB of JSON (1.4 MB zones, 2.8 MB 16-bit values as base64). Fine over Tauri IPC (decode about 30 ms), but a binary transport (Tauri `ipc::Response`, WASM shared memory) would halve it. | app services |
+| tauri | Native file pickers for the DE440 path and PNG export (needs `tauri-plugin-dialog`); today the path is typed and PNGs go to the Downloads folder. | app services |
+| app | The report anchors the day at civil noon of a fixed UT offset; derive the offset (with DST) from the city's IANA zone in Rust for historical dates. | app services |
+| tauri | Map evaluation scales about 6x on 24 threads (0.25° world grid, measured while other builds ran); profile per-cell cost and thread scaling on an idle machine. | app services |
 | fixtures | Odeh Table VI is missing 159 naked-eye rows (V > 8.18). ICOP records weren't extractable. | validation |
 | licensing | Confirm that committing the Yallop (Crown copyright) and Odeh (Springer) tables as test data is acceptable before the repository goes public. | validation |
