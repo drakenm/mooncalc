@@ -30,29 +30,35 @@
 //! * **rule-based** calendars ([`RuleCalendar`]): the Umm al-Qura rules and
 //!   conjunction rules.
 //!
-//! Their month starts are computed by background jobs ([`crate::jobs`]),
-//! a few Hijri years at a time, for the years on screen (the selected date,
-//! the month view and the comparison table). Results are kept per
-//! configuration (spec, ephemeris), and the providers keep their own caches,
-//! so changing back to an earlier setting or year is instant. Until a year
-//! is computed, the calendar reports it as outside its range. Every computed
-//! calendar also gets a column in the comparison table.
+//! Their month starts are computed by the shared engine
+//! `mooncalc_app::calendar::CalendarEngine` (the Tauri frontend's too: the
+//! providers, their caches, and the per-month coverage rule), on background
+//! jobs ([`crate::jobs`]), a few Hijri years at a time, for the years on
+//! screen (the selected date, the month view and the comparison table). The
+//! engine keeps them per configuration (spec, ephemeris), so changing back to
+//! an earlier setting or year is instant. Until a year is computed, the
+//! calendar reports it as outside its range. Every computed calendar also
+//! gets a column in the comparison table. The month views, the converter and
+//! the comparison read dates through `mooncalc_hijri` grids from the
+//! engine's [`ViewCalendar`].
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
-use std::sync::{Arc, Mutex};
+use std::collections::{BTreeSet, HashMap};
+use std::sync::Arc;
 
-use mooncalc_core::{Ephemeris, GeoLocation};
-use mooncalc_hijri::chained::{month_from_index, month_index};
+use mooncalc_app::calendar::{
+    CalendarEngine, CalendarSpec, MonthStartsParams, VisibilityCalendarSpec, YearCoverage,
+    hijri_year_coverage, start_covered,
+};
+pub use mooncalc_app::calendar::{KnownStarts, ViewCalendar as ActiveCalendar};
+use mooncalc_app::dto::Location;
+use mooncalc_core::GeoLocation;
 use mooncalc_hijri::civil::{CivilCalendar, CivilDate};
 use mooncalc_hijri::tabular::TABULAR_II_CIVIL;
 use mooncalc_hijri::{
     CalendarInfo, CalendarKind, DEFAULT_CALENDAR_ID, GridDay, HijriCalendar, HijriDate, HijriMonth,
-    MonthGrid, MonthStartProvider, ObservedCalendar, Weekday, calendars, civil_month_grid,
-    hijri_month_grid, info_by_id,
+    MonthGrid, Weekday, calendars, civil_month_grid, hijri_month_grid, info_by_id,
 };
-use mooncalc_visibility::calendar::{
-    DynProvider, MECCA, Observers, RegionPreset, RuleCalendar, VisibilityProvider,
-};
+use mooncalc_visibility::calendar::{MECCA, Observers, RegionPreset, RuleCalendar};
 use serde::{Deserialize, Serialize};
 
 use crate::backend::{self, BackendChoice};
@@ -154,9 +160,9 @@ impl Default for CalendarSettings {
 pub const VISIBILITY_ID: &str = "visibility";
 
 /// [`VisibilityCalendarSettings::observers`]: the app's observer location.
-pub const OBSERVERS_APP_LOCATION: &str = "location";
+pub const OBSERVERS_APP_LOCATION: &str = mooncalc_app::calendar::OBSERVERS_LOCATION;
 /// [`VisibilityCalendarSettings::observers`]: the Kaʿba, Mecca.
-pub const OBSERVERS_MECCA: &str = "mecca";
+pub const OBSERVERS_MECCA: &str = mooncalc_app::calendar::OBSERVERS_MECCA;
 
 /// Settings of the visibility-based calendar.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -314,25 +320,35 @@ impl ComputedSpec {
         format!("{spec}|{:?}|{}", backend.effective(), de440_path.trim())
     }
 
-    /// The month-start provider, computed with `eph`.
-    fn provider(&self, eph: Arc<dyn Ephemeris>) -> Result<DynProvider, String> {
-        match self {
-            ComputedSpec::Visibility {
-                criterion_id,
-                max_zone,
-                observers,
-                ..
-            } => {
-                let criterion = mooncalc_visibility::criteria::by_id(criterion_id)
-                    .ok_or_else(|| format!("Unknown criterion {criterion_id:?}"))?;
-                Ok(Box::new(VisibilityProvider::new(
-                    eph,
-                    Arc::from(criterion),
-                    *max_zone,
-                    observers,
-                )))
-            }
-            ComputedSpec::Rule(r) => Ok(r.provider(eph)),
+    /// The service's spec of this calendar; `vs` and `location` configure
+    /// the visibility-based one.
+    pub fn app_spec(
+        &self,
+        vs: &VisibilityCalendarSettings,
+        location: &LocationSettings,
+    ) -> CalendarSpec {
+        let visibility = match self {
+            ComputedSpec::Rule(_) => None,
+            ComputedSpec::Visibility { .. } => Some(VisibilityCalendarSpec {
+                criterion_id: vs.criterion_id.clone(),
+                max_zone: u8::try_from(vs.max_zone).unwrap_or(u8::MAX),
+                observers: match vs.observers.as_str() {
+                    OBSERVERS_MECCA => OBSERVERS_MECCA.to_owned(),
+                    id if RegionPreset::from_id(id).is_some() => id.to_owned(),
+                    _ => OBSERVERS_APP_LOCATION.to_owned(),
+                },
+                location: Some(Location {
+                    lat_deg: location.lat_deg,
+                    lon_deg: location.lon_deg,
+                    elevation_m: location.elevation_m,
+                }),
+                location_name: Some(location.name.clone()),
+                grid_step_deg: Some(vs.grid_step_deg),
+            }),
+        };
+        CalendarSpec {
+            id: self.id().to_owned(),
+            visibility,
         }
     }
 }
@@ -348,93 +364,16 @@ pub fn computed_specs(settings: &Settings) -> Vec<ComputedSpec> {
     .collect()
 }
 
-/// Month starts known so far, as a provider (`None` for months not yet
-/// computed).
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct KnownStarts(pub BTreeMap<i64, i64>);
-
-impl MonthStartProvider for KnownStarts {
-    fn month_start(&self, hijri_year: i32, month: u8) -> Option<i64> {
-        if !(1..=12).contains(&month) {
-            return None;
-        }
-        self.0.get(&month_index(hijri_year, month)).copied()
-    }
-}
-
-/// The calendar the tab shows: a built-in one, or a computed one with the
-/// years computed so far.
-#[derive(Clone)]
-pub enum ActiveCalendar {
-    Builtin(&'static (dyn HijriCalendar + Sync)),
-    Computed(Arc<ObservedCalendar<KnownStarts>>),
-}
-
-impl ActiveCalendar {
-    pub fn get(&self) -> &dyn HijriCalendar {
-        match self {
-            ActiveCalendar::Builtin(c) => *c,
-            ActiveCalendar::Computed(c) => c.as_ref(),
-        }
-    }
-}
-
 /// The built-in calendar for the selected id (the default one for a
 /// computed or unknown id).
 pub fn builtin_calendar(settings: &CalendarSettings) -> &'static (dyn HijriCalendar + Sync) {
     selected_info(&settings.calendar_id).calendar
 }
 
-/// Ephemeris and providers shared with the background jobs, so that their
-/// caches outlive any one job.
-#[derive(Default)]
-struct Engine {
-    ephemeris: Mutex<Option<(String, Arc<dyn Ephemeris>)>>,
-    providers: Mutex<HashMap<String, Arc<DynProvider>>>,
-}
-
-/// Providers kept at most (all are dropped when this is exceeded).
-const MAX_PROVIDERS: usize = 24;
-
-impl Engine {
-    fn ephemeris(
-        &self,
-        backend: BackendChoice,
-        de440_path: &str,
-    ) -> Result<Arc<dyn Ephemeris>, String> {
-        let key = format!("{:?}|{}", backend.effective(), de440_path.trim());
-        let mut slot = self.ephemeris.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some((k, eph)) = slot.as_ref()
-            && *k == key
-        {
-            return Ok(eph.clone());
-        }
-        // The shared backend (with its Meeus fallback for an unusable DE440).
-        let eph = backend::resolve(backend, de440_path).eph;
-        *slot = Some((key, eph.clone()));
-        Ok(eph)
-    }
-
-    fn provider(
-        &self,
-        key: &str,
-        spec: &ComputedSpec,
-        eph: &Arc<dyn Ephemeris>,
-    ) -> Result<Arc<DynProvider>, String> {
-        if let Some(p) = self.lock_providers().get(key) {
-            return Ok(p.clone());
-        }
-        let p = Arc::new(spec.provider(eph.clone())?);
-        let mut map = self.lock_providers();
-        if map.len() >= MAX_PROVIDERS {
-            map.clear();
-        }
-        Ok(map.entry(key.to_owned()).or_insert(p).clone())
-    }
-
-    fn lock_providers(&self) -> std::sync::MutexGuard<'_, HashMap<String, Arc<DynProvider>>> {
-        self.providers.lock().unwrap_or_else(|e| e.into_inner())
-    }
+/// The engine's ephemeris id for a backend choice: the cache key of its
+/// computed month starts (two DE440 files share a name, not a path).
+fn engine_ephemeris_id(backend: BackendChoice, de440_path: &str) -> String {
+    format!("{:?}|{}", backend.effective(), de440_path.trim())
 }
 
 /// One unit of background work: one Hijri year of one computed calendar.
@@ -442,72 +381,16 @@ impl Engine {
 struct YearRequest {
     key: String,
     spec: ComputedSpec,
+    calendar: CalendarSpec,
     year: i32,
 }
 
-/// What a job returns: per request (key, year), the month starts found
-/// (month index → JDN), including the following Muḥarram.
-type BatchResult = Vec<(String, i32, Vec<(i64, i64)>)>;
+/// What a job returns: the (key, year) pairs now computed in the engine.
+type BatchResult = Vec<(String, i32)>;
 
 /// Requests per job: small batches deliver results progressively and lose
 /// little when replaced.
 const BATCH_SIZE: usize = 4;
-
-/// Days before a month start whose ephemeris data the start depends on:
-/// the conjunction (up to two days earlier), the evening tests from the day
-/// before it, and each evening's searches (±1.75 d around local noon, which
-/// is up to half a day from UT noon).
-const START_MARGIN_BEFORE: f64 = 5.0;
-/// Days after a month start whose data it depends on (its eve's searches).
-const START_MARGIN_AFTER: f64 = 3.0;
-/// Largest difference between the tabular estimate of a month start and
-/// a computed one, days.
-const TABULAR_ERROR_DAYS: i64 = 3;
-
-/// Whether the ephemeris covers everything the month starting on civil day
-/// `jdn` depends on. Starts too close to (or beyond) the edges of the
-/// coverage are dropped rather than shown wrong: outside it the evening
-/// tests see no crescent, which would silently lengthen months.
-fn start_covered(eph: &dyn Ephemeris, jdn: i64) -> bool {
-    let (a, b) = eph.valid_range();
-    let jd = jdn as f64;
-    jd - START_MARGIN_BEFORE >= a && jd + START_MARGIN_AFTER <= b
-}
-
-/// Whether a month whose tabular start is `estimate` may start inside the
-/// coverage (otherwise it is not computed at all).
-fn estimate_covered(eph: &dyn Ephemeris, estimate: i64) -> bool {
-    start_covered(eph, estimate - TABULAR_ERROR_DAYS)
-        || start_covered(eph, estimate + TABULAR_ERROR_DAYS)
-}
-
-/// How much of a Hijri year the ephemeris covers.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum YearCoverage {
-    Full,
-    Partial,
-    Outside,
-}
-
-/// The coverage of Hijri `year`, from the tabular estimate of its months.
-fn hijri_year_coverage(eph: &dyn Ephemeris, year: i32) -> YearCoverage {
-    let starts: Vec<i64> = (1..=12)
-        .filter_map(|m| TABULAR_II_CIVIL.month_start(year, m))
-        .collect();
-    let covered = starts
-        .iter()
-        .filter(|&&s| {
-            start_covered(eph, s - TABULAR_ERROR_DAYS) && start_covered(eph, s + TABULAR_ERROR_DAYS)
-        })
-        .count();
-    if covered == starts.len() {
-        YearCoverage::Full
-    } else if starts.iter().any(|&s| estimate_covered(eph, s)) {
-        YearCoverage::Partial
-    } else {
-        YearCoverage::Outside
-    }
-}
 
 /// A sentence about the wanted Hijri years the ephemeris does not fully
 /// cover, if any.
@@ -552,67 +435,40 @@ fn coverage_note(active: &backend::ActiveEphemeris, years: &[i32]) -> Option<Str
     ))
 }
 
-/// Compute a batch of years on a worker thread.
+/// Compute a batch of years on a worker thread
+/// (`CalendarEngine::compute_year_with`, cancellable month by month).
 fn compute_batch(
-    engine: &Engine,
+    engine: &CalendarEngine,
     backend: BackendChoice,
     de440_path: &str,
     batch: &[YearRequest],
     job: &JobContext,
 ) -> Result<BatchResult, JobError> {
-    let eph = engine
-        .ephemeris(backend, de440_path)
-        .map_err(JobError::Failed)?;
-    let total = batch.len() * 13;
+    let eph = backend::resolve(backend, de440_path).eph;
+    let ephemeris_id = engine_ephemeris_id(backend, de440_path);
     let mut out = Vec::with_capacity(batch.len());
     for (b, req) in batch.iter().enumerate() {
-        let provider = engine
-            .provider(&req.key, &req.spec, &eph)
-            .map_err(JobError::Failed)?;
-        let first = month_index(req.year, 1);
-        let mut starts = Vec::with_capacity(13);
-        for (i, n) in (first..=first + 12).enumerate() {
-            job.checkpoint()?;
-            let (y, m) = month_from_index(n);
-            // Skip months entirely outside the coverage; keep only starts
-            // whose data is all inside it.
-            let estimate = TABULAR_II_CIVIL.month_start(y, m);
-            if estimate.is_none_or(|e| estimate_covered(eph.as_ref(), e))
-                && let Some(jdn) = provider.month_start(y, m)
-                && start_covered(eph.as_ref(), jdn)
-            {
-                starts.push((n, jdn));
-            }
-            job.set_progress((b * 13 + i + 1) as f32 / total as f32);
-        }
-        out.push((req.key.clone(), req.year, starts));
+        job.checkpoint()?;
+        let params = MonthStartsParams {
+            calendar: req.calendar.clone(),
+            hijri_year: req.year,
+            ephemeris_id: Some(ephemeris_id.clone()),
+        };
+        engine
+            .compute_year_with(&eph, &params, |done, total| {
+                job.set_progress((b * total + done) as f32 / (batch.len() * total) as f32);
+                !job.is_cancelled()
+            })
+            .map_err(|e| {
+                if e.code == "cancelled" {
+                    JobError::Cancelled
+                } else {
+                    JobError::Failed(e.message)
+                }
+            })?;
+        out.push((req.key.clone(), req.year));
     }
     Ok(out)
-}
-
-/// Results of one computed calendar received so far.
-#[derive(Default)]
-struct Computed {
-    starts: BTreeMap<i64, i64>,
-    years: BTreeSet<i32>,
-    calendar: Option<Arc<ObservedCalendar<KnownStarts>>>,
-}
-
-impl Computed {
-    fn add(&mut self, year: i32, starts: Vec<(i64, i64)>, spec: &ComputedSpec) {
-        self.starts.extend(starts);
-        self.years.insert(year);
-        let (Some(&first), Some(&last)) = (self.years.first(), self.years.last()) else {
-            return;
-        };
-        self.calendar = Some(Arc::new(ObservedCalendar::new(
-            KnownStarts(self.starts.clone()),
-            spec.id(),
-            spec.name(),
-            first,
-            last,
-        )));
-    }
 }
 
 /// The Hijri year containing civil day `jdn`, near enough to choose which
@@ -865,10 +721,11 @@ pub struct CalendarTab {
     comparison_year: Option<i32>,
     /// Whether the fonts can show the transliteration diacritics.
     diacritics: Option<bool>,
-    /// Ephemeris and month-start providers shared with the jobs.
-    engine: Arc<Engine>,
-    /// Computed month starts per calendar key.
-    computed: HashMap<String, Computed>,
+    /// Computed month starts and their providers, shared with the jobs.
+    engine: Arc<CalendarEngine>,
+    /// The calendar of each computed-calendar key, refreshed from the engine
+    /// when a job delivers years.
+    computed: HashMap<String, ActiveCalendar>,
     job: JobSlot<BatchResult>,
     /// What the running job computes.
     in_flight: Vec<YearRequest>,
@@ -893,21 +750,19 @@ impl CalendarTab {
     /// The months of `spec` computed so far, as a calendar (empty if none).
     fn computed_calendar(
         &self,
+        settings: &Settings,
         key: &str,
         spec: &ComputedSpec,
-    ) -> Arc<ObservedCalendar<KnownStarts>> {
-        self.computed
-            .get(key)
-            .and_then(|c| c.calendar.clone())
-            .unwrap_or_else(|| {
-                Arc::new(ObservedCalendar::new(
-                    KnownStarts::default(),
-                    spec.id(),
-                    spec.name(),
-                    1,
-                    0,
-                ))
-            })
+    ) -> ActiveCalendar {
+        if let Some(c) = self.computed.get(key) {
+            return c.clone();
+        }
+        let active = backend::resolve(settings.backend, &settings.de440_path);
+        let ephemeris_id = engine_ephemeris_id(settings.backend, &settings.de440_path);
+        let calendar = spec.app_spec(&settings.calendar.visibility, &settings.location);
+        self.engine
+            .view_calendar(active.eph.as_ref(), &calendar, Some(&ephemeris_id))
+            .unwrap_or_else(|_| ActiveCalendar::Builtin(builtin_calendar(&settings.calendar)))
     }
 
     /// The calendar the tab works with.
@@ -920,7 +775,7 @@ impl CalendarTab {
             .into_iter()
             .find(|(_, s)| s.id() == id)
         {
-            Some((key, spec)) => ActiveCalendar::Computed(self.computed_calendar(&key, &spec)),
+            Some((key, spec)) => self.computed_calendar(settings, &key, &spec),
             None => ActiveCalendar::Builtin(builtin_calendar(&settings.calendar)),
         }
     }
@@ -931,20 +786,29 @@ impl CalendarTab {
         let selected = settings.calendar.calendar_id.as_str();
         let mut specs = Self::specs(settings);
         specs.sort_by_key(|(_, s)| s.id() != selected);
+        let active = backend::resolve(settings.backend, &settings.de440_path);
+        let ephemeris_id = engine_ephemeris_id(settings.backend, &settings.de440_path);
         let mut out = Vec::new();
         for (key, spec) in specs {
-            for &year in &self.wanted_years {
-                let done = self
-                    .computed
-                    .get(&key)
-                    .is_some_and(|c| c.years.contains(&year));
-                if !done {
-                    out.push(YearRequest {
-                        key: key.clone(),
-                        spec: spec.clone(),
-                        year,
-                    });
-                }
+            let calendar = spec.app_spec(&settings.calendar.visibility, &settings.location);
+            // The engine knows which years it has (it may drop old ones) and
+            // leaves out years outside the ephemeris coverage.
+            let years = self
+                .engine
+                .missing_years(
+                    active.eph.as_ref(),
+                    &calendar,
+                    Some(&ephemeris_id),
+                    &self.wanted_years,
+                )
+                .unwrap_or_default();
+            for year in years {
+                out.push(YearRequest {
+                    key: key.clone(),
+                    spec: spec.clone(),
+                    calendar: calendar.clone(),
+                    year,
+                });
             }
         }
         out
@@ -954,15 +818,7 @@ impl CalendarTab {
     pub fn poll(&mut self, ctx: &egui::Context, tc: &mut TabContext<'_>) {
         match self.job.poll() {
             Some(Ok(results)) => {
-                for (key, year, starts) in results {
-                    if let Some(req) = self.in_flight.iter().find(|r| r.key == key) {
-                        let spec = req.spec.clone();
-                        self.computed
-                            .entry(key)
-                            .or_default()
-                            .add(year, starts, &spec);
-                    }
-                }
+                self.receive(tc.settings, results);
                 self.error = None;
             }
             Some(Err(e)) => {
@@ -1001,6 +857,21 @@ impl CalendarTab {
         }
         let active = backend::resolve(tc.settings.backend, &tc.settings.de440_path);
         self.coverage_note = coverage_note(&active, &self.wanted_years);
+    }
+
+    /// Refresh the calendars a job delivered years of.
+    fn receive(&mut self, settings: &Settings, results: BatchResult) {
+        let changed: BTreeSet<String> = results.into_iter().map(|(key, _)| key).collect();
+        // Drop every stale calendar (also of keys no longer on screen, which
+        // are rebuilt from the engine if they come back), then cache the
+        // current ones.
+        self.computed.retain(|key, _| !changed.contains(key));
+        for (key, spec) in Self::specs(settings) {
+            if changed.contains(&key) {
+                let cal = self.computed_calendar(settings, &key, &spec);
+                self.computed.insert(key, cal);
+            }
+        }
     }
 
     /// Remember which Hijri years are on screen, for [`Self::poll`].
@@ -1399,14 +1270,13 @@ impl CalendarTab {
 
         // Columns: the Umm al-Qura tables, the computed calendars, then the
         // arithmetical calendars.
-        let computed: Vec<(ComputedSpec, Arc<ObservedCalendar<KnownStarts>>)> =
-            Self::specs(tc.settings)
-                .into_iter()
-                .map(|(key, spec)| {
-                    let cal = self.computed_calendar(&key, &spec);
-                    (spec, cal)
-                })
-                .collect();
+        let computed: Vec<(ComputedSpec, ActiveCalendar)> = Self::specs(tc.settings)
+            .into_iter()
+            .map(|(key, spec)| {
+                let cal = self.computed_calendar(tc.settings, &key, &spec);
+                (spec, cal)
+            })
+            .collect();
         let mut columns: Vec<Column<'_>> = Vec::new();
         let (uaq, tabular): (Vec<_>, Vec<_>) = calendars()
             .iter()
@@ -1423,7 +1293,7 @@ impl CalendarTab {
             id: spec.id(),
             label: spec.short_label().to_owned(),
             hover: format!("{}\n{}", spec.name(), spec.description()),
-            calendar: cal.as_ref(),
+            calendar: cal.get(),
             computed: true,
         }));
         columns.extend(tabular.into_iter().map(builtin));
@@ -1867,32 +1737,44 @@ mod tests {
         ));
     }
 
+    /// A tab with one request of `spec` for `year` in flight.
+    fn request(tab: &mut CalendarTab, settings: &Settings, id: &str, year: i32) -> YearRequest {
+        let (key, spec) = CalendarTab::specs(settings)
+            .into_iter()
+            .find(|(_, s)| s.id() == id)
+            .unwrap();
+        let req = YearRequest {
+            calendar: spec.app_spec(&settings.calendar.visibility, &settings.location),
+            key,
+            spec,
+            year,
+        };
+        tab.in_flight = vec![req.clone()];
+        req
+    }
+
     #[test]
     fn computes_a_year_in_the_background() {
         // The job function on the calling thread: the Umm al-Qura rule for
-        // 1445 AH, then shown through a `KnownStarts` calendar.
-        let engine = Engine::default();
-        let spec = ComputedSpec::Rule(RuleCalendar::UmmAlQuraRule);
-        let req = YearRequest {
-            key: spec.key(BackendChoice::Meeus, ""),
-            spec: spec.clone(),
-            year: 1445,
+        // 1445 AH in the shared engine, then shown through its calendar.
+        let mut tab = CalendarTab::default();
+        let settings = Settings {
+            backend: BackendChoice::Meeus,
+            ..Settings::default()
         };
+        let req = request(&mut tab, &settings, RuleCalendar::UmmAlQuraRule.id(), 1445);
         let out = compute_batch(
-            &engine,
+            &tab.engine,
             BackendChoice::Meeus,
             "",
             std::slice::from_ref(&req),
             &JobContext::detached(),
         )
         .unwrap();
-        assert_eq!(out.len(), 1);
-        let (key, year, starts) = out.into_iter().next().unwrap();
-        assert_eq!((key.as_str(), year), (req.key.as_str(), 1445));
-        assert_eq!(starts.len(), 13);
-        let mut c = Computed::default();
-        c.add(year, starts, &spec);
-        let cal = c.calendar.unwrap();
+        assert_eq!(out, vec![(req.key.clone(), 1445)]);
+        tab.receive(&settings, out);
+        let cal = tab.computed_calendar(&settings, &req.key, &req.spec);
+        let cal = cal.get();
         assert_eq!(cal.supported_range().first_year, 1445);
         // 1 Ramaḍān 1445 = 11 March 2024 under both the rule and the table.
         assert_eq!(cal.month_start(1445, 9), Some(jdn(2024, 3, 11)));
@@ -1902,22 +1784,12 @@ mod tests {
         );
         assert_eq!(cal.year_length(1445), UMM_AL_QURA.year_length(1445));
         assert_eq!(cal.to_hijri(jdn(2030, 1, 1)), None);
-        // The provider is cached for the next job.
-        assert_eq!(engine.lock_providers().len(), 1);
     }
 
-    /// Meeus claiming coverage of 2022-06-01 to 2024-03-31 only (TT): from
-    /// before 1 Muharram 1444, which the chain of 1445 AH starts from.
+    /// Meeus claiming coverage of 2022-06-01 to 2024-03-31 only (TT).
     struct HalfYear;
 
-    impl HalfYear {
-        fn ok(&self, t: f64) -> bool {
-            let (a, b) = self.valid_range();
-            (a..=b).contains(&t)
-        }
-    }
-
-    impl Ephemeris for HalfYear {
+    impl mooncalc_core::Ephemeris for HalfYear {
         fn name(&self) -> &str {
             "half year"
         }
@@ -1925,82 +1797,34 @@ mod tests {
             (2_459_731.5, 2_460_400.5)
         }
         fn sun_equatorial(&self, t: f64) -> mooncalc_core::Equatorial {
-            let e = mooncalc_core::MeeusEphemeris::new().sun_equatorial(t);
-            if self.ok(t) { e } else { nan_equatorial() }
+            mooncalc_core::MeeusEphemeris::new().sun_equatorial(t)
         }
         fn moon_equatorial(&self, t: f64) -> mooncalc_core::Equatorial {
-            let e = mooncalc_core::MeeusEphemeris::new().moon_equatorial(t);
-            if self.ok(t) { e } else { nan_equatorial() }
+            mooncalc_core::MeeusEphemeris::new().moon_equatorial(t)
         }
         fn sun_ecliptic(&self, t: f64) -> mooncalc_core::Ecliptic {
-            let e = mooncalc_core::MeeusEphemeris::new().sun_ecliptic(t);
-            if self.ok(t) { e } else { nan_ecliptic() }
+            mooncalc_core::MeeusEphemeris::new().sun_ecliptic(t)
         }
         fn moon_ecliptic(&self, t: f64) -> mooncalc_core::Ecliptic {
-            let e = mooncalc_core::MeeusEphemeris::new().moon_ecliptic(t);
-            if self.ok(t) { e } else { nan_ecliptic() }
+            mooncalc_core::MeeusEphemeris::new().moon_ecliptic(t)
         }
     }
 
-    fn nan_equatorial() -> mooncalc_core::Equatorial {
-        mooncalc_core::Equatorial {
-            ra: f64::NAN,
-            dec: f64::NAN,
-            distance_km: f64::NAN,
-        }
-    }
-
-    fn nan_ecliptic() -> mooncalc_core::Ecliptic {
-        mooncalc_core::Ecliptic {
-            lon: f64::NAN,
-            lat: f64::NAN,
-            distance_km: f64::NAN,
-        }
-    }
-
+    /// The note names the wanted years the ephemeris covers only partly or
+    /// not at all (the months themselves: `mooncalc_app::calendar`).
     #[test]
-    fn partly_covered_years_keep_only_covered_months() {
-        let eph: Arc<dyn Ephemeris> = Arc::new(HalfYear);
-        // 1445 AH runs from July 2023 to July 2024: partly covered. 1446 AH
-        // (from July 2024) is outside.
-        assert_eq!(
-            hijri_year_coverage(eph.as_ref(), 1445),
-            YearCoverage::Partial
-        );
-        assert_eq!(
-            hijri_year_coverage(eph.as_ref(), 1446),
-            YearCoverage::Outside
-        );
+    fn coverage_note_names_partly_covered_years() {
         let active = backend::ActiveEphemeris {
-            eph: eph.clone(),
+            eph: Arc::new(HalfYear),
             used: BackendChoice::De440,
             notice: None,
         };
+        // 1445 AH runs from July 2023 to July 2024: partly covered. 1446 AH
+        // (from July 2024) is outside.
         let note = coverage_note(&active, &[1446, 1445]).unwrap();
         assert!(note.contains("year 1445 only partly inside"), "{note}");
         assert!(note.contains("year 1446 outside"), "{note}");
         assert!(coverage_note(&active, &[]).is_none());
-
-        // The Umm al-Qura rule over the covered months agrees with the
-        // table; the months outside are left out, not lengthened.
-        let spec = ComputedSpec::Rule(RuleCalendar::UmmAlQuraRule);
-        let provider = spec.provider(eph.clone()).unwrap();
-        let first = month_index(1445, 1);
-        let mut kept = Vec::new();
-        for n in first..=first + 12 {
-            let (y, m) = month_from_index(n);
-            let estimate = TABULAR_II_CIVIL.month_start(y, m);
-            if estimate.is_none_or(|e| estimate_covered(eph.as_ref(), e))
-                && let Some(jdn) = provider.month_start(y, m)
-                && start_covered(eph.as_ref(), jdn)
-            {
-                assert_eq!(UMM_AL_QURA.month_start(y, m), Some(jdn), "{y}-{m}");
-                kept.push(m);
-            }
-        }
-        // Muharram (2023-07-19) to Ramadan (2024-03-11) start inside;
-        // Shawwal (2024-04-10) does not.
-        assert_eq!(kept, (1..=9).collect::<Vec<u8>>(), "{kept:?}");
     }
 
     #[test]
@@ -2028,19 +1852,23 @@ mod tests {
         );
         assert_eq!(missing[1].year, 1446);
         // Once a year is in, it is no longer requested and is shown.
-        let spec = missing[0].spec.clone();
-        let starts = (0..13)
-            .map(|i| (month_index(1445, 1) + i, jdn(2023, 7, 19) + 29 * i + i / 2))
-            .collect();
-        tab.computed
-            .entry(missing[0].key.clone())
-            .or_default()
-            .add(1445, starts, &spec);
+        let req = request(&mut tab, &settings, missing[0].spec.id(), 1445);
+        assert_eq!(req, missing[0]);
+        let out = compute_batch(
+            &tab.engine,
+            settings.backend,
+            &settings.de440_path,
+            std::slice::from_ref(&req),
+            &JobContext::detached(),
+        )
+        .unwrap();
+        tab.receive(&settings, out);
         assert_eq!(tab.missing(&settings).len(), missing.len() - 1);
         let ActiveCalendar::Computed(cal) = tab.active_calendar(&settings) else {
             panic!()
         };
-        assert_eq!(cal.month_start(1445, 1), Some(jdn(2023, 7, 19)));
+        assert_eq!(cal.supported_range().first_year, 1445);
+        assert!(cal.month_start(1445, 1).is_some());
     }
 
     #[test]
