@@ -396,6 +396,7 @@ mod tests {
     use super::*;
     use crate::criteria::Yallop;
     use mooncalc_core::MeeusEphemeris;
+    use mooncalc_core::events::{ApparentTable, Body, EventKind, Horizon, Searcher};
 
     fn evening(lat: f64, lon: f64, date: CalendarDate) -> Outcome {
         let eph = MeeusEphemeris::new();
@@ -474,6 +475,70 @@ mod tests {
         assert!(c.conjunction.jd_ut > c.evaluation.jd_ut);
         // Sunrise at Mecca ~ 03:40 UT.
         assert_eq!(c.sun_event.to_calendar().hour, 3);
+    }
+
+    #[test]
+    fn fast_events_match_robust_search_at_high_latitudes() {
+        // The fast local solvers must pick exactly the events the robust
+        // bracketing search defines: the first sunset after the transit and
+        // the moonset nearest it, including near polar day and night.
+        let eph = MeeusEphemeris::new();
+        let mut checked = 0;
+        for (y, m, d) in [(2024, 3, 11), (2024, 6, 7), (2024, 12, 1), (2025, 4, 28)] {
+            let date = CalendarDate::new(y, m, d);
+            let noon0 = Instant::from_jd_ut(date.jd0() + 0.5);
+            let table =
+                ApparentTable::with_default_step(&eph, noon0.add_days(-2.5), noon0.add_days(2.5));
+            let moons = new_moons_around(&eph, noon0);
+            for lat in (-89..=89).step_by(4) {
+                for lon in (-180..180).step_by(40) {
+                    let loc = GeoLocation::new(lat as f64, lon as f64, 0.0);
+                    let req =
+                        Request::local_date(loc, date, Sighting::Evening, EvaluationTime::Sunset);
+                    let o = compute_with(&table, &moons, &req, &Settings::default());
+                    let sun = Searcher::new(&table, Body::Sun, &loc, Horizon::STANDARD);
+                    let tt = sun.transit_near(req.noon.jd_ut, false);
+                    let sets: Vec<f64> = sun
+                        .crossings(tt, tt + 1.0)
+                        .into_iter()
+                        .filter(|e| e.kind == EventKind::Set)
+                        .map(|e| e.time.jd_ut)
+                        .collect();
+                    match (sets.first(), o.circumstances()) {
+                        (None, _) => {
+                            assert!(matches!(o, Outcome::NoSunEvent(_)), "{lat} {lon} {o:?}")
+                        }
+                        (Some(&ts), Some(c)) => {
+                            assert!(
+                                (c.sun_event.jd_ut - ts).abs() * 86_400.0 < 0.5,
+                                "{lat} {lon}"
+                            );
+                            let moon = Searcher::new(&table, Body::Moon, &loc, Horizon::STANDARD);
+                            let near = moon
+                                .crossings(ts - 0.55, ts + 0.55)
+                                .into_iter()
+                                .filter(|e| e.kind == EventKind::Set)
+                                .map(|e| e.time.jd_ut)
+                                .min_by(|a, b| (a - ts).abs().total_cmp(&(b - ts).abs()));
+                            match (near, c.moon_event) {
+                                (Some(a), Some(b)) => {
+                                    assert!((a - b.jd_ut).abs() * 86_400.0 < 0.5, "{lat} {lon}")
+                                }
+                                (a, b) => assert_eq!(a.is_some(), b.is_some(), "{lat} {lon}"),
+                            }
+                            checked += 1;
+                        }
+                        (Some(_), None) => {
+                            assert!(matches!(
+                                o,
+                                Outcome::MoonAlwaysDown { .. } | Outcome::MoonAlwaysUp { .. }
+                            ))
+                        }
+                    }
+                }
+            }
+        }
+        assert!(checked > 1000, "{checked}");
     }
 
     #[test]
