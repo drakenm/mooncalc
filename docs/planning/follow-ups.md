@@ -35,5 +35,7 @@ GitHub issues can't be filed from this environment yet: the `gh` CLI is authenti
 | tauri | Map evaluation scales about 6x on 24 threads (0.25° world grid, measured while other builds ran); profile per-cell cost and thread scaling on an idle machine. | app services |
 | gui | Ephemeris-tab jobs are keyed on backend choice and path, so `backend::reload()` of the same DE440 file doesn't refresh open views. | gui ephemeris + moon |
 | gui | Moon-tab crater coordinates are rounded (about 0.5°) and mare outlines are schematic. | gui ephemeris + moon |
+| tauri | Ephemeris table requests are capped at 10,000 rows (1,500 drawn); concurrent calendar requests can compute the same missing year twice. | tauri calendar + ephemeris |
+| app | Both frontends use a fixed UT offset with no DST rules, so local times on dates across a DST change are off by an hour. | tauri calendar + ephemeris |
 | fixtures | Odeh Table VI is missing 159 naked-eye rows (V > 8.18). ICOP records weren't extractable. | validation |
 | licensing | Confirm that committing the Yallop (Crown copyright) and Odeh (Springer) tables as test data is acceptable before the repository goes public. | validation |
