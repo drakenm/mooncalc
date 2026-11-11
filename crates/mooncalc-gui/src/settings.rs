@@ -10,6 +10,7 @@
 //! a saved file: missing fields take their defaults. Renaming or removing a
 //! field silently resets it, so prefer adding.
 
+use mooncalc_atlas::{LocalTime, Zone};
 use mooncalc_core::{GeoLocation, Instant};
 use serde::{Deserialize, Serialize};
 
@@ -121,14 +122,33 @@ pub struct MapRequest {
     pub de440_path: String,
 }
 
+/// How local times are derived.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TzMode {
+    /// A fixed offset from UT, [`TimeSettings::tz_offset_hours`].
+    #[default]
+    Fixed,
+    /// An IANA time zone, [`TimeSettings::tz_name`], whose rules (DST and
+    /// historical changes) give the offset at each instant.
+    Zone,
+}
+
 /// The selected date and time.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct TimeSettings {
     /// The selected moment, as a Julian Day in UT. This is canonical.
     pub jd_ut: f64,
-    /// Time-zone offset for display, in hours east of Greenwich (UTC+3 = 3.0).
+    /// Fixed time-zone offset, in hours east of Greenwich (UTC+3 = 3.0),
+    /// used in [`TzMode::Fixed`].
     pub tz_offset_hours: f64,
+    /// Fixed offset or IANA zone. Settings saved before zones existed have
+    /// no such field and keep their fixed offset.
+    #[serde(default)]
+    pub tz_mode: TzMode,
+    /// IANA zone for [`TzMode::Zone`], e.g. `Europe/London`; choosing a city
+    /// sets it. An unknown name falls back to the fixed offset.
+    pub tz_name: String,
     /// Show and edit the date in local time (UT + offset) rather than UT.
     pub edit_local: bool,
     /// Reset to the current time at startup instead of restoring `jd_ut`.
@@ -140,6 +160,8 @@ impl Default for TimeSettings {
         Self {
             jd_ut: datetime::round_to_minute(datetime::now_jd()),
             tz_offset_hours: 0.0,
+            tz_mode: TzMode::Fixed,
+            tz_name: String::new(),
             edit_local: false,
             start_at_now: true,
         }
@@ -147,23 +169,66 @@ impl Default for TimeSettings {
 }
 
 impl TimeSettings {
-    /// Offset applied to `jd_ut` for the fields shown in the input, in days.
-    pub fn display_offset_days(&self) -> f64 {
-        if self.edit_local {
-            self.tz_offset_hours / 24.0
-        } else {
-            0.0
+    /// The time zone for local times: the IANA zone in [`TzMode::Zone`]
+    /// (the fixed offset if its name is unknown), else the fixed offset.
+    pub fn zone(&self) -> Zone {
+        match self.tz_mode {
+            TzMode::Zone => Zone::iana_or_fixed(Some(&self.tz_name), self.tz_offset_hours),
+            TzMode::Fixed => Zone::fixed_hours(self.tz_offset_hours),
         }
     }
 
-    /// The time zone for local times.
-    pub fn zone(&self) -> mooncalc_atlas::Zone {
-        mooncalc_atlas::Zone::fixed_hours(self.tz_offset_hours)
+    /// Use the IANA zone `name`. The fixed offset becomes the zone's offset
+    /// now, so switching back to a fixed offset starts from it.
+    pub fn set_zone(&mut self, name: &str) {
+        if let Ok(z) = Zone::iana(name) {
+            self.tz_mode = TzMode::Zone;
+            self.tz_name = z.iana_name().unwrap_or(name).to_owned();
+            self.tz_offset_hours = z.offset_hours(self.jd_ut);
+        }
     }
 
-    /// Julian Day in local time (UT + time-zone offset).
+    /// Use a fixed offset, hours east.
+    pub fn set_fixed(&mut self, hours: f64) {
+        self.tz_mode = TzMode::Fixed;
+        self.tz_offset_hours = hours;
+    }
+
+    /// The UTC offset at the selected instant, hours.
+    pub fn offset_hours(&self) -> f64 {
+        self.zone().offset_hours(self.jd_ut)
+    }
+
+    /// Julian Day in local time (UT + the zone's offset at the instant).
     pub fn jd_local(&self) -> f64 {
-        self.jd_ut + self.tz_offset_hours / 24.0
+        self.zone().to_local(self.jd_ut)
+    }
+
+    /// The Julian Day the date/time input shows for `jd_ut`: local time
+    /// when editing in local time, else UT.
+    pub fn to_display(&self, jd_ut: f64) -> f64 {
+        if self.edit_local {
+            self.zone().to_local(jd_ut)
+        } else {
+            jd_ut
+        }
+    }
+
+    /// The UT Julian Day of a value entered in the date/time input. A local
+    /// time skipped by a DST change moves forward by the gap; a repeated
+    /// one takes its first occurrence.
+    pub fn from_display(&self, jd: f64) -> f64 {
+        if self.edit_local {
+            self.zone().to_ut(jd)
+        } else {
+            jd
+        }
+    }
+
+    /// How the local time shown for the instant maps back to UT: whether it
+    /// is one of two occurrences (clocks went back).
+    pub fn local_resolution(&self) -> LocalTime {
+        self.zone().resolve_local(self.jd_local())
     }
 
     /// Set to the current time, rounded to the minute.
@@ -272,6 +337,8 @@ mod tests {
             time: TimeSettings {
                 jd_ut: 2_461_000.25,
                 tz_offset_hours: 5.5,
+                tz_mode: TzMode::Fixed,
+                tz_name: String::new(),
                 edit_local: true,
                 start_at_now: false,
             },
@@ -357,6 +424,43 @@ mod tests {
     fn local_time_applies_the_offset() {
         let s = sample();
         assert!((s.time.jd_local() - (s.time.jd_ut + 5.5 / 24.0)).abs() < 1e-12);
-        assert!((s.time.display_offset_days() - 5.5 / 24.0).abs() < 1e-12);
+        let shown = s.time.to_display(s.time.jd_ut);
+        assert!((shown - (s.time.jd_ut + 5.5 / 24.0)).abs() < 1e-12);
+        assert!((s.time.from_display(shown) - s.time.jd_ut).abs() < 1e-12);
+    }
+
+    #[test]
+    fn zone_mode_follows_dst() {
+        let mut t = TimeSettings {
+            // 2024-03-30 12:00 UT, the day before the BST change.
+            jd_ut: 2_460_400.0,
+            edit_local: true,
+            ..TimeSettings::default()
+        };
+        t.set_zone("Europe/London");
+        assert_eq!(t.tz_mode, TzMode::Zone);
+        assert_eq!(t.offset_hours(), 0.0);
+        t.jd_ut += 1.0;
+        assert_eq!(t.offset_hours(), 1.0);
+        assert!((t.jd_local() - (t.jd_ut + 1.0 / 24.0)).abs() < 1e-12);
+        // The fixed mode keeps its own offset.
+        t.set_fixed(3.0);
+        assert_eq!(t.offset_hours(), 3.0);
+        // An unknown zone name is ignored.
+        t.set_zone("Nowhere/Land");
+        assert_eq!(t.tz_mode, TzMode::Fixed);
+    }
+
+    #[test]
+    fn settings_without_a_zone_keep_their_fixed_offset() {
+        // A file saved before zones existed: no tz_mode or tz_name.
+        let json = r#"{"time":{"jd_ut":2460400.0,"tz_offset_hours":-5.0}}"#;
+        let s: Settings = serde_json::from_str(json).unwrap();
+        assert_eq!(s.time.tz_mode, TzMode::Fixed);
+        assert_eq!(s.time.offset_hours(), -5.0);
+        let mut z = s.clone();
+        z.time.set_zone("America/New_York");
+        let back: Settings = serde_json::from_str(&serde_json::to_string(&z).unwrap()).unwrap();
+        assert_eq!(back.time.zone().iana_name(), Some("America/New_York"));
     }
 }

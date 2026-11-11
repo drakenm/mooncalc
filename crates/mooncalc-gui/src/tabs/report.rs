@@ -11,6 +11,7 @@
 //! **civil** noon in the user's time zone, so "the evening of 10 March" is
 //! the one a local observer means.
 
+use mooncalc_atlas::Zone;
 use std::fmt::Write as _;
 
 use mooncalc_core::events::{ApparentTable, CalendarDate};
@@ -35,7 +36,7 @@ use crate::settings::Settings;
 #[derive(Clone, Debug, PartialEq)]
 pub struct ReportKey {
     pub date: CalendarDate,
-    pub tz_offset_hours: f64,
+    pub zone: Zone,
     pub name: String,
     pub lat_deg: f64,
     pub lon_deg: f64,
@@ -47,7 +48,7 @@ impl ReportKey {
     pub fn from_settings(s: &Settings, active: &ActiveEphemeris) -> Self {
         Self {
             date: CalendarDate::from_jd(s.time.jd_local()),
-            tz_offset_hours: s.time.tz_offset_hours,
+            zone: s.time.zone(),
             name: s.location.name.clone(),
             lat_deg: s.location.lat_deg,
             lon_deg: s.location.lon_deg,
@@ -58,14 +59,25 @@ impl ReportKey {
 
     /// Civil noon of the local date, as UT.
     pub fn civil_noon(&self) -> Instant {
-        Instant::from_jd_ut(self.date.jd0() + 0.5 - self.tz_offset_hours / 24.0)
+        self.zone.civil_noon(self.date)
     }
 
     /// When the world map for this date shows another evening at the
     /// observer's longitude (its date line is the 180° meridian): the note
     /// naming the map date that shows this report's evening.
     pub fn map_date_note(&self) -> Option<mooncalc_app::dto::MapDateNote> {
-        mooncalc_app::dateline::report_note(self.date, self.lon_deg, self.tz_offset_hours)
+        mooncalc_app::dateline::report_note(self.date, self.lon_deg, self.offset_hours())
+    }
+
+    /// The UTC offset at civil noon, hours.
+    pub fn offset_hours(&self) -> f64 {
+        self.zone.offset_hours(self.civil_noon().jd_ut)
+    }
+
+    /// The zone at civil noon for labels (`UTC+03:00`, `Europe/London, BST
+    /// (UTC+01:00)`).
+    pub fn zone_text(&self) -> String {
+        crate::datetime::zone_text(self.zone, self.civil_noon().jd_ut)
     }
 }
 
@@ -316,7 +328,7 @@ fn heading(s: Sighting) -> &'static str {
 
 /// The circumstance rows: (label, value).
 fn circumstance_rows(r: &SightingReport, key: &ReportKey) -> Vec<(String, String)> {
-    let tz = key.tz_offset_hours;
+    let tz = key.zone;
     let d = Some((key.date.year, key.date.month, key.date.day));
     let t = |jd: f64| fmt_local_ut(jd, tz, d);
     let evening = r.sighting == Sighting::Evening;
@@ -429,7 +441,7 @@ pub fn report_text(data: &ReportData) -> String {
         k.date.year,
         k.date.month,
         k.date.day,
-        crate::datetime::format_utc_offset(k.tz_offset_hours)
+        k.zone_text()
     );
     let _ = writeln!(out, "Ephemeris: {}", k.ephemeris);
     if let Some(n) = k.map_date_note() {
@@ -553,7 +565,7 @@ impl ReportTab {
                 k.date.year,
                 k.date.month,
                 k.date.day,
-                crate::datetime::format_utc_offset(k.tz_offset_hours)
+                k.zone_text()
             ));
             ui.separator();
             if ui.button("Copy as text").clicked() {
@@ -565,7 +577,7 @@ impl ReportTab {
             "Ephemeris: {}. Times are local ({}) with UT in brackets. Rise/set use the \
              standard horizon (upper limb, 34′ refraction).",
             k.ephemeris,
-            crate::datetime::format_utc_offset(k.tz_offset_hours)
+            k.zone_text()
         ));
         if let Some(n) = k.map_date_note() {
             ui.add(
@@ -667,7 +679,7 @@ mod tests {
     fn key(lat: f64, lon: f64, date: CalendarDate, tz: f64) -> ReportKey {
         ReportKey {
             date,
-            tz_offset_hours: tz,
+            zone: Zone::fixed_hours(tz),
             name: "Test".into(),
             lat_deg: lat,
             lon_deg: lon,

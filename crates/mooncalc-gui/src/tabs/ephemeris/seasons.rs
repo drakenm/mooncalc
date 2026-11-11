@@ -2,6 +2,7 @@
 //! against the ephemeris by `mooncalc_core::seasons`) and the equation of
 //! time through the year (Meeus eq. 28.1).
 
+use mooncalc_atlas::Zone;
 use mooncalc_core::Instant;
 use mooncalc_core::seasons::{equation_of_time, seasons_of_year};
 
@@ -39,7 +40,7 @@ pub struct YearSeasons {
 }
 
 /// Compute the seasons and the daily equation of time of `year`.
-pub fn year_seasons(eph: &dyn mooncalc_core::Ephemeris, year: i32, tz: f64) -> YearSeasons {
+pub fn year_seasons(eph: &dyn mooncalc_core::Ephemeris, year: i32, tz: Zone) -> YearSeasons {
     let jd = seasons_of_year(eph, year);
     let seasons = jd.map(Instant::from_jd_tt);
     let eot = |t: Instant| equation_of_time(eph, t.jd_tt()) * MIN_PER_RAD;
@@ -62,7 +63,7 @@ pub fn year_seasons(eph: &dyn mooncalc_core::Ephemeris, year: i32, tz: f64) -> Y
 #[derive(Clone, Debug, PartialEq)]
 struct Request {
     year: i32,
-    tz: f64,
+    tz: Zone,
     eph: EphKey,
 }
 
@@ -83,7 +84,7 @@ impl SeasonsView {
         if visible && self.coverage(tc).is_none() {
             let req = Request {
                 year: self.year.unwrap_or(app_year(tc.settings)),
-                tz: tc.settings.time.tz_offset_hours,
+                tz: tc.settings.time.zone(),
                 eph: EphKey::of(tc.settings),
             };
             let eph = ephemeris(tc.settings);
@@ -96,7 +97,7 @@ impl SeasonsView {
     }
 
     pub fn ui(&mut self, ui: &mut egui::Ui, tc: &mut TabContext<'_>) {
-        let tz = tc.settings.time.tz_offset_hours;
+        let tz = tc.settings.time.zone();
         let eph = ephemeris(tc.settings);
         ui.horizontal_wrapped(|ui| {
             year_picker(ui, &mut self.year, app_year(tc.settings));
@@ -225,7 +226,7 @@ mod tests {
     #[test]
     fn equation_of_time_extremes_2024() {
         let eph = MeeusEphemeris::new();
-        let ys = year_seasons(&eph, 2024, 0.0);
+        let ys = year_seasons(&eph, 2024, Zone::UTC);
         assert_eq!(ys.daily_eot.len(), 366);
         let c = ys.seasons[0].to_calendar();
         assert_eq!((c.month, c.day), (3, 20));

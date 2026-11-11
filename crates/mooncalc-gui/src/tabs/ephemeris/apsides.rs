@@ -2,6 +2,7 @@
 //! ch. 50), node passages (ch. 51) and maximum declinations (ch. 52), each
 //! refined against the ephemeris by `mooncalc_core`.
 
+use mooncalc_atlas::Zone;
 use mooncalc_core::Instant;
 use mooncalc_core::angle::DEG;
 use mooncalc_core::apsides::{Apsis, ApsisKind, apsides_between};
@@ -31,7 +32,7 @@ pub struct YearEvents {
 #[derive(Clone, Debug, PartialEq)]
 struct Request {
     year: i32,
-    tz: f64,
+    tz: Zone,
     eph: EphKey,
 }
 
@@ -53,7 +54,7 @@ impl ApsidesView {
         if visible && self.coverage(tc).is_none() {
             let req = Request {
                 year: self.year.unwrap_or(app_year(tc.settings)),
-                tz: tc.settings.time.tz_offset_hours,
+                tz: tc.settings.time.zone(),
                 eph: EphKey::of(tc.settings),
             };
             let eph = ephemeris(tc.settings);
@@ -81,7 +82,7 @@ impl ApsidesView {
     }
 
     pub fn ui(&mut self, ui: &mut egui::Ui, tc: &mut TabContext<'_>) {
-        let tz = tc.settings.time.tz_offset_hours;
+        let tz = tc.settings.time.zone();
         ui.horizontal_wrapped(|ui| {
             year_picker(ui, &mut self.year, app_year(tc.settings));
         });

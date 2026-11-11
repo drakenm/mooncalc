@@ -14,9 +14,9 @@
 use std::sync::Once;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use mooncalc_atlas::{Atlas, Place, UserAtlas, UserAtlasError, UserLocation};
+use mooncalc_atlas::{Atlas, Place, UserAtlas, UserAtlasError, UserLocation, Zone};
 
-use crate::settings::LocationSettings;
+use crate::settings::{LocationSettings, TimeSettings};
 
 /// eframe storage key for the user-locations JSON
 /// ([`UserAtlas::to_json_string`]).
@@ -40,7 +40,8 @@ pub struct CitySuggestion {
     pub elevation_m: f64,
     /// Population, for built-in cities.
     pub population: Option<u64>,
-    /// IANA time-zone identifier, for built-in cities.
+    /// IANA time-zone identifier: always for built-in cities, for user
+    /// locations when saved with one.
     pub timezone: Option<String>,
     /// Standard-time UTC offset, hours (a user location's saved offset).
     pub std_offset_hours: f64,
@@ -82,7 +83,7 @@ impl CitySuggestion {
             lon_deg: u.lon_deg,
             elevation_m: u.elevation_m,
             population: None,
-            timezone: None,
+            timezone: u.time_zone.clone(),
             std_offset_hours: u.utc_offset_hours,
             dst_offset_hours: u.utc_offset_hours,
             is_user: true,
@@ -94,13 +95,13 @@ impl CitySuggestion {
         self.dst_offset_hours != self.std_offset_hours
     }
 
-    /// The UTC offset to apply: the DST offset if `use_dst` and the zone
-    /// observes DST, otherwise the standard offset.
-    pub fn utc_offset_hours(&self, use_dst: bool) -> f64 {
-        if use_dst {
-            self.dst_offset_hours
-        } else {
-            self.std_offset_hours
+    /// Sets the time zone for local times: the place's IANA zone (whose
+    /// rules give the offset on every date) or, for a user location saved
+    /// without one, its fixed offset.
+    pub fn apply_zone_to(&self, time: &mut TimeSettings) {
+        match self.timezone.as_deref().filter(|z| Zone::iana(z).is_ok()) {
+            Some(z) => time.set_zone(z),
+            None => time.set_fixed(self.std_offset_hours),
         }
     }
 
@@ -224,19 +225,18 @@ pub fn load_user_atlas(json: Option<&str>) -> (UserAtlas, Option<UserAtlasError>
     }
 }
 
-/// A user location for the current observer and time-zone offset.
-pub fn user_location_from(
-    name: &str,
-    loc: &LocationSettings,
-    utc_offset_hours: f64,
-) -> UserLocation {
+/// A user location for the current observer and time zone (the IANA zone
+/// in zone mode, with the offset at the selected time as its fixed offset).
+pub fn user_location_from(name: &str, loc: &LocationSettings, time: &TimeSettings) -> UserLocation {
+    let zone = time.zone();
     UserLocation::new(
         name.trim(),
         loc.lat_deg,
         normalize_lon(loc.lon_deg),
         loc.elevation_m,
-        utc_offset_hours,
+        zone.offset_hours(time.jd_ut),
     )
+    .with_time_zone(zone.iana_name().map(str::to_owned))
 }
 
 /// Rename the user location at `index`.
@@ -318,7 +318,7 @@ mod tests {
         assert_eq!(mecca.timezone.as_deref(), Some("Asia/Riyadh"));
         assert_eq!(mecca.std_offset_hours, 3.0);
         assert!(!mecca.observes_dst());
-        assert_eq!(mecca.utc_offset_hours(true), 3.0);
+        assert_eq!(mecca.dst_offset_hours, 3.0);
         assert!(mecca.display().contains("pop."));
 
         let mut loc = LocationSettings::default();
@@ -331,14 +331,28 @@ mod tests {
         assert!(search_in(atlas, &user, "   ", 5).is_empty());
     }
 
+    /// Time settings with a fixed offset.
+    fn fixed(hours: f64) -> TimeSettings {
+        let mut t = TimeSettings::default();
+        t.set_fixed(hours);
+        t
+    }
+
     #[test]
-    fn dst_offset_is_used_only_when_asked() {
+    fn choosing_a_city_selects_its_zone() {
         let hits = search_in(Atlas::builtin(), &UserAtlas::new(), "London, GB", 1);
         let london = &hits[0];
         assert!(london.observes_dst());
-        assert_eq!(london.utc_offset_hours(false), 0.0);
-        assert_eq!(london.utc_offset_hours(true), 1.0);
         assert!(london.display().contains("DST"));
+        let mut time = fixed(3.0);
+        // 2024-07-01 12:00 UT: BST.
+        time.jd_ut = 2_460_493.0;
+        london.apply_zone_to(&mut time);
+        assert_eq!(time.tz_mode, crate::settings::TzMode::Zone);
+        assert_eq!(time.zone().iana_name(), Some("Europe/London"));
+        assert_eq!(time.offset_hours(), 1.0);
+        time.jd_ut -= 180.0;
+        assert_eq!(time.offset_hours(), 0.0);
     }
 
     #[test]
@@ -350,9 +364,18 @@ mod tests {
             lon_deg: 359.9, // normalised on save
             elevation_m: 35.0,
         };
-        user.add(user_location_from("  London rooftop ", &loc, 1.0))
+        user.add(user_location_from("  London rooftop ", &loc, &fixed(1.0)))
             .unwrap();
-        user.add(user_location_from("Hilltop", &loc, 0.0)).unwrap();
+        user.add(user_location_from("Hilltop", &loc, &fixed(0.0)))
+            .unwrap();
+        let mut zoned = fixed(0.0);
+        zoned.set_zone("Europe/London");
+        user.add(user_location_from("Office", &loc, &zoned))
+            .unwrap();
+        assert_eq!(
+            user.get(2).unwrap().time_zone.as_deref(),
+            Some("Europe/London")
+        );
 
         // Round trip through the stored JSON string.
         let json = user.to_json_string();
@@ -365,7 +388,7 @@ mod tests {
         let hits = search_in(Atlas::builtin(), &back, "London", 4);
         assert!(hits[0].is_user);
         assert_eq!(hits[0].name, "London rooftop");
-        assert_eq!(hits[0].utc_offset_hours(false), 1.0);
+        assert_eq!(hits[0].std_offset_hours, 1.0);
         assert!(!hits[1].is_user);
 
         // Rename and delete.
@@ -375,7 +398,7 @@ mod tests {
         assert!(rename_user_location(&mut edited, 1, "  ").is_err());
         assert!(rename_user_location(&mut edited, 9, "x").is_err());
         edited.remove(0);
-        assert_eq!(edited.len(), 1);
+        assert_eq!(edited.len(), 2);
         let (again, _) = load_user_atlas(Some(&edited.to_json_string()));
         assert_eq!(again.get(0).unwrap().name, "Valley");
     }

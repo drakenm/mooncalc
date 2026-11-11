@@ -13,9 +13,11 @@
 //!   circumstances at the app location.
 //! * [`seasons`]: equinoxes and solstices, and the equation of time.
 //!
-//! Times are shown in the app time zone (`Settings::time.tz_offset_hours`).
+//! Times are shown in the app time zone (`Settings::time.zone()`), each
+//! with the offset in force at that instant.
 //! Clicking an event time sets the app date/time to it.
 
+use mooncalc_atlas::Zone;
 use std::sync::Arc;
 
 use mooncalc_core::{Ephemeris, Instant};
@@ -72,7 +74,7 @@ pub(crate) fn coverage(
 /// The coverage problem for calendar year `year` (app time zone) with
 /// `margin` days either side.
 pub(crate) fn year_coverage(settings: &Settings, year: i32, margin: f64) -> Option<String> {
-    let (a, b) = year_bounds(year, settings.time.tz_offset_hours);
+    let (a, b) = year_bounds(year, settings.time.zone());
     coverage(settings, a.jd_ut, b.jd_ut, margin, margin)
 }
 
@@ -170,7 +172,7 @@ impl EphemerisTab {
             ui.separator();
             ui.weak(format!(
                 "Times in {} · {}",
-                format::zone_label(tc.settings.time.tz_offset_hours),
+                format::zone_label(tc.settings.time.zone()),
                 ephemeris(tc.settings).name()
             ));
         });
@@ -189,7 +191,7 @@ impl EphemerisTab {
 /// Set the app date/time to `t` and say so in the status bar.
 pub(crate) fn set_app_time(tc: &mut TabContext<'_>, t: Instant) {
     tc.settings.time.jd_ut = t.jd_ut;
-    let tz = tc.settings.time.tz_offset_hours;
+    let tz = tc.settings.time.zone();
     tc.status.notify(format!(
         "Time set to {} {}",
         format::date_time(t, tz),
@@ -212,7 +214,7 @@ pub(crate) fn time_link(ui: &mut egui::Ui, text: impl Into<String>) -> bool {
 pub(crate) fn time_cell(
     ui: &mut egui::Ui,
     t: Option<Instant>,
-    tz: f64,
+    tz: Zone,
     with_date: bool,
 ) -> Option<Instant> {
     match t {
@@ -236,11 +238,9 @@ pub(crate) fn app_year(settings: &Settings) -> i32 {
     DateTimeFields::from_jd(settings.time.jd_local()).year
 }
 
-/// UT bounds of a calendar year in a zone `tz` hours ahead of UT.
-pub(crate) fn year_bounds(year: i32, tz: f64) -> (Instant, Instant) {
-    let start = Instant::from_calendar(year, 1, 1, 0, 0, 0.0).add_days(-tz / 24.0);
-    let end = Instant::from_calendar(year + 1, 1, 1, 0, 0, 0.0).add_days(-tz / 24.0);
-    (start, end)
+/// UT bounds of a calendar year in zone `tz` (local midnight to midnight).
+pub(crate) fn year_bounds(year: i32, tz: Zone) -> (Instant, Instant) {
+    tz.year_bounds(year)
 }
 
 /// A year selector bound to the app year until edited. Returns the year.

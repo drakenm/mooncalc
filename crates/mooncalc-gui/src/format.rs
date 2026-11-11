@@ -1,7 +1,9 @@
 //! Text formatting shared by the map, report and export: instants in the
 //! user's time zone and UT, durations, angles and positions.
 
-use crate::datetime::format_utc_offset;
+use mooncalc_atlas::Zone;
+
+use crate::datetime::zone_abbrev;
 
 /// Broken-down date and time of a Julian Day, rounded to `unit_s` seconds.
 fn split(jd: f64, unit_s: f64) -> (i32, u32, u32, u32, u32, u32) {
@@ -26,26 +28,28 @@ pub fn fmt_jd_time_secs(jd: f64) -> String {
     format!("{h:02}:{mi:02}:{s:02}")
 }
 
-/// `2024-03-10 09:00 UT` plus, for a non-zero offset,
-/// ` (12:00 UTC+03:00)` (with the local date when it differs).
-pub fn fmt_instant(jd_ut: f64, tz_hours: f64) -> String {
+/// `2024-03-10 09:00 UT` plus the local time in `tz` at that instant,
+/// ` (12:00 UTC+03:00)` or ` (10:00 BST)` (with the local date when it
+/// differs), unless the zone is UT.
+pub fn fmt_instant(jd_ut: f64, tz: Zone) -> String {
     let ut = fmt_jd_minutes(jd_ut);
-    if tz_hours == 0.0 {
+    if tz == Zone::UTC {
         return format!("{ut} UT");
     }
-    let local = fmt_jd_minutes(jd_ut + tz_hours / 24.0);
+    let local = fmt_jd_minutes(tz.to_local(jd_ut));
     let shown = if local[..10] == ut[..10] {
         &local[11..]
     } else {
         &local[..]
     };
-    format!("{ut} UT ({shown} {})", format_utc_offset(tz_hours))
+    format!("{ut} UT ({shown} {})", zone_abbrev(tz, jd_ut))
 }
 
-/// Local time first, then UT, to the second: `18:42:10 UTC+03:00 (15:42:10
-/// UT)`; dates are added when the local date differs from `local_date`.
-pub fn fmt_local_ut(jd_ut: f64, tz_hours: f64, local_date: Option<(i32, u32, u32)>) -> String {
-    let local_jd = jd_ut + tz_hours / 24.0;
+/// Local time first (in `tz` at that instant), then UT, to the second:
+/// `18:42:10 UTC+03:00 (15:42:10 UT)` or `19:30:05 BST (18:30:05 UT)`;
+/// dates are added when the local date differs from `local_date`.
+pub fn fmt_local_ut(jd_ut: f64, tz: Zone, local_date: Option<(i32, u32, u32)>) -> String {
+    let local_jd = tz.to_local(jd_ut);
     let (y, mo, d, ..) = split(local_jd, 1.0);
     let date = if local_date == Some((y, mo, d)) {
         String::new()
@@ -53,12 +57,12 @@ pub fn fmt_local_ut(jd_ut: f64, tz_hours: f64, local_date: Option<(i32, u32, u32
         format!("{y:04}-{mo:02}-{d:02} ")
     };
     let local = fmt_jd_time_secs(local_jd);
-    if tz_hours == 0.0 {
+    if tz == Zone::UTC {
         format!("{date}{local} UT")
     } else {
         format!(
             "{date}{local} {} ({} UT)",
-            format_utc_offset(tz_hours),
+            zone_abbrev(tz, jd_ut),
             fmt_jd_time_secs(jd_ut)
         )
     }
@@ -112,25 +116,57 @@ mod tests {
 
     #[test]
     fn instants_in_ut_and_local_time() {
-        assert_eq!(fmt_instant(JD_2024_03_10_0900, 0.0), "2024-03-10 09:00 UT");
         assert_eq!(
-            fmt_instant(JD_2024_03_10_0900, 3.0),
+            fmt_instant(JD_2024_03_10_0900, Zone::fixed_hours(0.0)),
+            "2024-03-10 09:00 UT"
+        );
+        assert_eq!(
+            fmt_instant(JD_2024_03_10_0900, Zone::fixed_hours(3.0)),
             "2024-03-10 09:00 UT (12:00 UTC+03:00)"
         );
         assert_eq!(
-            fmt_instant(JD_2024_03_10_0900, -10.0),
+            fmt_instant(JD_2024_03_10_0900, Zone::fixed_hours(-10.0)),
             "2024-03-10 09:00 UT (2024-03-09 23:00 UTC-10:00)"
         );
         assert_eq!(
-            fmt_local_ut(JD_2024_03_10_0900, 3.0, Some((2024, 3, 10))),
+            fmt_local_ut(
+                JD_2024_03_10_0900,
+                Zone::fixed_hours(3.0),
+                Some((2024, 3, 10))
+            ),
             "12:00:00 UTC+03:00 (09:00:00 UT)"
         );
         assert_eq!(
-            fmt_local_ut(JD_2024_03_10_0900, 0.0, None),
+            fmt_local_ut(JD_2024_03_10_0900, Zone::fixed_hours(0.0), None),
             "2024-03-10 09:00:00 UT"
         );
         // Rounding carries into the next day.
         assert_eq!(fmt_jd_minutes(2_460_380.499_999), "2024-03-11 00:00");
+    }
+
+    #[test]
+    fn zone_times_use_the_offset_of_each_instant() {
+        let london = Zone::iana("Europe/London").unwrap();
+        // 2024-03-30 and 2024-03-31, both 18:00 UT: GMT, then BST.
+        let before = 2_460_400.25;
+        let after = before + 1.0;
+        assert_eq!(
+            fmt_instant(before, london),
+            "2024-03-30 18:00 UT (18:00 GMT)"
+        );
+        assert_eq!(
+            fmt_instant(after, london),
+            "2024-03-31 18:00 UT (19:00 BST)"
+        );
+        assert_eq!(
+            fmt_local_ut(after, london, Some((2024, 3, 31))),
+            "19:00:00 BST (18:00:00 UT)"
+        );
+        let riyadh = Zone::iana("Asia/Riyadh").unwrap();
+        assert_eq!(
+            fmt_instant(before, riyadh),
+            "2024-03-30 18:00 UT (21:00 UTC+03:00)"
+        );
     }
 
     #[test]

@@ -10,6 +10,7 @@
 //!   libration, P, colongitude, and the next sunrise/sunset at a chosen
 //!   crater (Meeus ch. 53, `mooncalc_core::libration::lunar_sunrise`).
 
+use mooncalc_atlas::Zone;
 use mooncalc_core::angle::{DEG, norm_2pi};
 use mooncalc_core::libration::{MoonPhysical, sun_altitude_on_moon};
 use mooncalc_core::tables::{EphemerisRow, TableOptions, ephemeris_row};
@@ -241,7 +242,7 @@ impl MoonTab {
                         st,
                         &physical,
                         ms.topocentric,
-                        tc.settings.time.tz_offset_hours,
+                        tc.settings.time.zone(),
                     );
                     ui.separator();
                     clicked = crater_ui(ui, st, tc);
@@ -256,7 +257,7 @@ impl MoonTab {
                         let now = libration_graph::lb_deg(eph.as_ref(), tc.settings.instant());
                         let w = ui.available_width().clamp(240.0, 420.0);
                         libration_graph::show(ui, egui::vec2(w, w * 0.9), curve, eph.as_ref(), now);
-                        let tz = tc.settings.time.tz_offset_hours;
+                        let tz = tc.settings.time.zone();
                         ui.weak(format!(
                             "New Moon {} → {}",
                             format::date_time(curve.new_moon, tz),
@@ -282,7 +283,7 @@ fn disc_ui(
     q: f64,
 ) {
     let ms = &tc.settings.moon_tab;
-    let tz = tc.settings.time.tz_offset_hours;
+    let tz = tc.settings.time.zone();
     ui.horizontal_wrapped(|ui| {
         ui.heading("Moon close-up");
         ui.label(format!(
@@ -357,7 +358,7 @@ fn disc_ui(
     );
 }
 
-fn data_grid(ui: &mut egui::Ui, st: &MoonState, p: &MoonPhysical, topocentric: bool, tz: f64) {
+fn data_grid(ui: &mut egui::Ui, st: &MoonState, p: &MoonPhysical, topocentric: bool, tz: Zone) {
     let r = &st.row;
     let illum = if topocentric {
         r.topocentric_illumination.unwrap_or(r.illumination)
@@ -449,7 +450,7 @@ fn data_grid(ui: &mut egui::Ui, st: &MoonState, p: &MoonPhysical, topocentric: b
 }
 
 fn crater_ui(ui: &mut egui::Ui, st: &MoonState, tc: &mut TabContext<'_>) -> Option<Instant> {
-    let tz = tc.settings.time.tz_offset_hours;
+    let tz = tc.settings.time.zone();
     let mut clicked = None;
     ui.horizontal(|ui| {
         ui.label("Crater:");

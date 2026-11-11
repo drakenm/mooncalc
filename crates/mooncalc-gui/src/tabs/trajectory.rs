@@ -19,6 +19,7 @@
 //! cancel-and-replace); a day outside the ephemeris coverage shows a notice
 //! instead.
 
+use mooncalc_atlas::Zone;
 use std::sync::Arc;
 
 use egui::{Align2, Color32, Pos2, Rect, Sense, Stroke, pos2, vec2};
@@ -118,14 +119,13 @@ impl TrajectoryTab {
             self.last_app_jd = Some(tc.settings.time.jd_ut);
         }
         let key = DayKey::new(tc.settings, self.time);
-        let tz = tc.settings.time.tz_offset_hours;
-        let start = key.zone.day_bounds(key.date).0.jd_ut;
-        self.controls(ui, tc, start, tz);
+        let tz = key.zone;
+        let (start, end) = key.zone.day_bounds(key.date);
+        let (start, end) = (start.jd_ut, end.jd_ut);
+        self.controls(ui, tc, (start, end), tz);
 
         let active = crate::backend::resolve(tc.settings.backend, &tc.settings.de440_path);
-        if let Some(problem) =
-            active.span_problem(start, start + 1.0, DAY_MARGIN_DAYS, DAY_MARGIN_DAYS)
-        {
+        if let Some(problem) = active.span_problem(start, end, DAY_MARGIN_DAYS, DAY_MARGIN_DAYS) {
             coverage_notice(ui, &problem);
             return;
         }
@@ -141,9 +141,11 @@ impl TrajectoryTab {
         );
         // The previous day may stand in while the new one is computed, as
         // long as its interpolation table spans the shown instant.
-        let Some(day) = self.day.clone().filter(|d| {
-            (d.start - DAY_MARGIN_DAYS..=d.start + 1.0 + DAY_MARGIN_DAYS).contains(&self.time)
-        }) else {
+        let Some(day) = self
+            .day
+            .clone()
+            .filter(|d| (d.start - DAY_MARGIN_DAYS..=d.end + DAY_MARGIN_DAYS).contains(&self.time))
+        else {
             busy(ui, true);
             return;
         };
@@ -151,7 +153,7 @@ impl TrajectoryTab {
             busy(ui, true);
         }
         let phases_complete = active
-            .span_problem(start, start + 1.0, PHASES_BEFORE_DAYS, PHASES_AFTER_DAYS)
+            .span_problem(start, end, PHASES_BEFORE_DAYS, PHASES_AFTER_DAYS)
             .is_none();
         let snap = day.snapshot(self.time);
 
@@ -167,7 +169,13 @@ impl TrajectoryTab {
         egui::ScrollArea::vertical().show(ui, |ui| readouts(ui, &day, &snap, tz, phases_complete));
     }
 
-    fn controls(&mut self, ui: &mut egui::Ui, tc: &mut TabContext<'_>, day_start: f64, tz: f64) {
+    fn controls(
+        &mut self,
+        ui: &mut egui::Ui,
+        tc: &mut TabContext<'_>,
+        (day_start, day_end): (f64, f64),
+        tz: Zone,
+    ) {
         ui.horizontal_wrapped(|ui| {
             ui.toggle_value(&mut tc.settings.trajectory_tab.live, "● Live")
                 .on_hover_text("Keep the app time at the current time");
@@ -183,7 +191,7 @@ impl TrajectoryTab {
                 "{} — {}, {}",
                 format_date_hm(self.time, tz),
                 tc.settings.location.name,
-                crate::datetime::format_utc_offset(tz)
+                crate::datetime::zone_text(tz, self.time)
             ));
             if ui
                 .button("Apply")
@@ -199,7 +207,7 @@ impl TrajectoryTab {
             let mut t = self.time;
             ui.spacing_mut().slider_width = (ui.available_width() - 50.0).max(150.0);
             let r = ui.add(
-                egui::Slider::new(&mut t, day_start..=day_start + 1.0 - 1.0 / 1440.0)
+                egui::Slider::new(&mut t, day_start..=day_end - 1.0 / 1440.0)
                     .show_value(false)
                     .smart_aim(false),
             );
@@ -216,16 +224,19 @@ impl TrajectoryTab {
         ui: &mut egui::Ui,
         day: &Day,
         snap: &Snapshot,
-        tz: f64,
+        tz: Zone,
         size: egui::Vec2,
         live: &mut bool,
     ) {
         let (response, painter) = ui.allocate_painter(size, Sense::click_and_drag());
         let outer = response.rect;
         let rect = Rect::from_min_max(outer.min + vec2(34.0, 6.0), outer.max - vec2(8.0, 20.0));
-        let x_of = |jd: f64| rect.left() + ((jd - day.start) as f32) * rect.width();
+        // The day runs local midnight to midnight: 23 or 25 hours when the
+        // clocks change.
+        let len = day.end - day.start;
+        let x_of = |jd: f64| rect.left() + ((jd - day.start) / len) as f32 * rect.width();
         let y_of = |alt: f64| rect.top() + ((90.0 - alt / DEG) / 180.0) as f32 * rect.height();
-        let jd_of = |x: f32| day.start + f64::from((x - rect.left()) / rect.width());
+        let jd_of = |x: f32| day.start + f64::from((x - rect.left()) / rect.width()) * len;
 
         // Twilight bands.
         for w in day.samples.windows(2) {
@@ -252,8 +263,10 @@ impl TrajectoryTab {
                 ui.visuals().weak_text_color(),
             );
         }
+        let midnight = day.key.date.jd0();
         for h in (0..=24).step_by(3) {
-            let x = x_of(day.start + f64::from(h) / 24.0);
+            // Local clock hours (a skipped hour falls on the next one).
+            let x = x_of(tz.to_ut(midnight + f64::from(h) / 24.0).min(day.end));
             painter.vline(x, rect.y_range(), grid);
             painter.text(
                 pos2(x, rect.bottom() + 3.0),
@@ -378,7 +391,7 @@ impl TrajectoryTab {
 }
 
 /// The polar diagram of azimuths (seen from above).
-fn compass(ui: &mut egui::Ui, day: &Day, snap: &Snapshot, tz: f64, side: f32) {
+fn compass(ui: &mut egui::Ui, day: &Day, snap: &Snapshot, tz: Zone, side: f32) {
     let (response, painter) = ui.allocate_painter(vec2(side, side), Sense::hover());
     let rect = response.rect;
     let proj = CompassProjection {
@@ -510,7 +523,7 @@ fn compass(ui: &mut egui::Ui, day: &Day, snap: &Snapshot, tz: f64, side: f32) {
 }
 
 /// A rise/set/transit line: "07:12  az 84.5° E".
-fn event_text(day: &Day, t: Option<Instant>, moon: bool, tz: f64, transit: bool) -> String {
+fn event_text(day: &Day, t: Option<Instant>, moon: bool, tz: Zone, transit: bool) -> String {
     let Some(t) = t else {
         return "—".to_owned();
     };
@@ -535,7 +548,7 @@ fn circumpolar_note(ev: &DayEvents, body: &str) -> Option<String> {
     })
 }
 
-fn readouts(ui: &mut egui::Ui, day: &Day, snap: &Snapshot, tz: f64, phases_complete: bool) {
+fn readouts(ui: &mut egui::Ui, day: &Day, snap: &Snapshot, tz: Zone, phases_complete: bool) {
     let shadow = |alt: f64| match shadow_length(1.0, alt) {
         Some(l) if l < 1000.0 => format!("{l:.2} m"),
         Some(_) => "> 1 km".to_owned(),
@@ -622,8 +635,8 @@ fn readouts(ui: &mut egui::Ui, day: &Day, snap: &Snapshot, tz: f64, phases_compl
         });
         ui.add_space(6.0);
         ui.weak(format!(
-            "Times in UTC{:+}; rise/set for the upper limb with 34′ refraction. {}. Curves every {} min.",
-            tz,
+            "Times in {}; rise/set for the upper limb with 34′ refraction. {}. Curves every {} min.",
+            crate::datetime::zone_text(tz, snap.jd_ut),
             day.ephemeris_name,
             (DAY_SAMPLE_STEP * 1440.0).round()
         ));

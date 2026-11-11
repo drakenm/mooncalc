@@ -3,6 +3,7 @@
 //! length of each lunation (`mooncalc_core::events::phases`: Meeus ch. 49
 //! refined against the ephemeris).
 
+use mooncalc_atlas::Zone;
 use std::collections::BTreeMap;
 
 use mooncalc_core::events::Phase;
@@ -70,7 +71,7 @@ pub fn lunations(eph: &dyn Ephemeris, t0: Instant, t1: Instant) -> Vec<Lunation>
 #[derive(Clone, Debug, PartialEq)]
 struct Request {
     year: i32,
-    tz: f64,
+    tz: Zone,
     eph: EphKey,
 }
 
@@ -92,7 +93,7 @@ impl PhasesView {
         if visible && self.coverage(tc).is_none() {
             let req = Request {
                 year: self.year.unwrap_or(app_year(tc.settings)),
-                tz: tc.settings.time.tz_offset_hours,
+                tz: tc.settings.time.zone(),
                 eph: EphKey::of(tc.settings),
             };
             let eph = ephemeris(tc.settings);
@@ -106,7 +107,7 @@ impl PhasesView {
     }
 
     pub fn ui(&mut self, ui: &mut egui::Ui, tc: &mut TabContext<'_>) {
-        let tz = tc.settings.time.tz_offset_hours;
+        let tz = tc.settings.time.zone();
         let eph = ephemeris(tc.settings);
         ui.horizontal_wrapped(|ui| {
             year_picker(ui, &mut self.year, app_year(tc.settings));
@@ -197,7 +198,7 @@ mod tests {
     #[test]
     fn phases_of_2024() {
         let eph = MeeusEphemeris::new();
-        let (t0, t1) = year_bounds(2024, 0.0);
+        let (t0, t1) = year_bounds(2024, Zone::UTC);
         let ls = lunations(&eph, t0, t1);
         let count: usize = ls.iter().map(|l| l.phases.iter().flatten().count()).sum();
         // 2024 has 13 new Moons (the last on 30 December), 12 first

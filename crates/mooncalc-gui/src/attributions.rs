@@ -66,6 +66,19 @@ pub const ATTRIBUTIONS: &[Attribution] = &[
         url: Some("https://www.geonames.org"),
     },
     Attribution {
+        name: "IANA Time Zone Database",
+        usage: mooncalc_atlas::tz::TZ_ATTRIBUTION,
+        license: "Public domain",
+        url: Some("https://www.iana.org/time-zones"),
+    },
+    Attribution {
+        name: "jiff by Andrew Gallant",
+        usage: "Evaluates the time-zone rules (DST and historical offsets); \
+                its jiff-tzdb crate embeds the IANA database.",
+        license: "MIT OR Unlicense",
+        url: Some("https://github.com/BurntSushi/jiff"),
+    },
+    Attribution {
         name: "hijridate by Mohammed Alshehri",
         usage: mooncalc_hijri::umalqura::ATTRIBUTION_OFFICIAL,
         license: "MIT",
@@ -105,6 +118,8 @@ mod tests {
             "DE440",
             "Natural Earth",
             "GeoNames",
+            "IANA Time Zone Database",
+            "jiff",
             "hijridate",
             "ICU",
             "van Gent",

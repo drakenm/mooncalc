@@ -285,6 +285,36 @@ impl std::fmt::Display for DateTimeFields {
     }
 }
 
+/// The short name of a zone at an instant: its abbreviation when that is
+/// a word (`BST`, `EDT`, `IST`), else the offset as `UTC±HH:MM` (for
+/// fixed offsets and for zones whose abbreviation is numeric, like `+03`).
+pub fn zone_abbrev(zone: mooncalc_atlas::Zone, jd_ut: f64) -> String {
+    if !zone.is_fixed() {
+        let a = zone.abbreviation(jd_ut);
+        if !a.is_empty() && a.chars().all(|c| c.is_ascii_alphabetic()) {
+            return a;
+        }
+    }
+    format_utc_offset(zone.offset_hours(jd_ut))
+}
+
+/// The zone at an instant for labels: `UTC+03:00`, or for an IANA zone
+/// `Europe/London, BST (UTC+01:00)`.
+pub fn zone_text(zone: mooncalc_atlas::Zone, jd_ut: f64) -> String {
+    let offset = format_utc_offset(zone.offset_hours(jd_ut));
+    match zone.iana_name() {
+        None => offset,
+        Some(name) => {
+            let abbrev = zone_abbrev(zone, jd_ut);
+            if abbrev == offset {
+                format!("{name}, {offset}")
+            } else {
+                format!("{name}, {abbrev} ({offset})")
+            }
+        }
+    }
+}
+
 /// Format a time-zone offset in hours as `UTC±HH:MM`.
 pub fn format_utc_offset(hours: f64) -> String {
     let sign = if hours < 0.0 { '-' } else { '+' };
@@ -452,6 +482,19 @@ mod tests {
         let r = round_to_minute(now);
         assert!((r - now).abs() <= 0.5 / 1440.0 + 1e-9);
         assert!(close(round_to_minute(r), r));
+    }
+
+    #[test]
+    fn zone_labels() {
+        use mooncalc_atlas::Zone;
+        let summer = calendar_to_jd(2024, 7, 1.5);
+        let london = Zone::iana("Europe/London").unwrap();
+        assert_eq!(zone_abbrev(london, summer), "BST");
+        assert_eq!(zone_text(london, summer), "Europe/London, BST (UTC+01:00)");
+        let riyadh = Zone::iana("Asia/Riyadh").unwrap();
+        assert_eq!(zone_abbrev(riyadh, summer), "UTC+03:00");
+        assert_eq!(zone_text(riyadh, summer), "Asia/Riyadh, UTC+03:00");
+        assert_eq!(zone_text(Zone::fixed_hours(-3.5), summer), "UTC-03:30");
     }
 
     #[test]

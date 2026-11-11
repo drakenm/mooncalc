@@ -5,6 +5,7 @@
 //! obscuration of solar eclipses (`local_solar_eclipse`), and whether the
 //! Moon is above the horizon at each contact of a lunar eclipse.
 
+use mooncalc_atlas::Zone;
 use mooncalc_core::angle::DEG;
 use mooncalc_core::eclipses::{
     Eclipse, EclipseContact, EclipseFilter, LocalEclipseKind, LocalSolarEclipse,
@@ -237,7 +238,7 @@ impl EclipsesView {
     /// The searched years, plus the lunations around them.
     fn coverage(&self, tc: &TabContext<'_>) -> Option<String> {
         let (first, last) = self.range(tc);
-        let tz = tc.settings.time.tz_offset_hours;
+        let tz = tc.settings.time.zone();
         let (start, _) = year_bounds(first, tz);
         let (_, end) = year_bounds(last, tz);
         coverage(
@@ -275,7 +276,7 @@ impl EclipsesView {
     }
 
     pub fn ui(&mut self, ui: &mut egui::Ui, tc: &mut TabContext<'_>) {
-        let tz = tc.settings.time.tz_offset_hours;
+        let tz = tc.settings.time.zone();
         ui.horizontal_wrapped(|ui| {
             let app = app_year(tc.settings);
             let mut first = self.first.unwrap_or(app);
@@ -438,7 +439,7 @@ fn summary(item: &EclipseItem) -> (String, String, String) {
 fn details_ui(
     ui: &mut egui::Ui,
     item: &EclipseItem,
-    tz: f64,
+    tz: Zone,
     location: &str,
     clicked: &mut Option<Instant>,
 ) {
