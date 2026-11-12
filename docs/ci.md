@@ -7,8 +7,10 @@ MoonCalc is a desktop application, so nothing is deployed. In the AGENTS.md rele
 ## When CI runs
 
 - Pushes to `master`, `feature/**` and `release/v*`.
-- Pull requests into those branches.
+- Pull requests into those branches, but only from `release/v*` branches. Pull requests from any other branch skip the whole workflow, and `ci-required` reports skipped, which branch protection accepts as passing.
 - Manually, from the Actions tab (`workflow_dispatch`).
+
+A `changes` job gates the checks. It diffs the push (`before..after`) or the pull request (`base...head`). When every changed file is Markdown (`*.md`) or under `docs/`, the checks are skipped and `ci-required` passes. `LICENSE` counts as code because the GUI embeds it. Manual runs, new branches and force pushes whose old head is gone run every check.
 
 A newer run for the same ref cancels the one in progress.
 
@@ -21,7 +23,8 @@ A newer run for the same ref cancels the one in progress.
 | `test (ubuntu-latest)`, `test (windows-latest)` | both | `cargo test --workspace` |
 | `wasm` | ubuntu-latest | `cargo build --target wasm32-unknown-unknown -p mooncalc-core -p mooncalc-visibility -p mooncalc-maps -p mooncalc-hijri -p mooncalc-atlas -p mooncalc-app` (the [portability rule](architecture.md)) |
 | `frontend` | ubuntu-latest, Node 24 | `npm ci`, `npm run build`, `npm run check` in `frontend/tauri/` |
-| `ci-required` | ubuntu-latest | Needs every job above. Fails unless all of them succeeded, including when one failed, was cancelled or was skipped. |
+| `changes` | ubuntu-latest | Decides whether the change touches code (see [When CI runs](#when-ci-runs)). Skipped for pull requests from non-release branches. |
+| `ci-required` | ubuntu-latest | Needs every job above. Fails unless all of them succeeded, including when one failed, was cancelled or was skipped. The exception is a documentation-only change, where the checks are skipped on purpose and it passes. |
 
 Branch protection should require only the `ci-required` check. It always reports a result, so the rule doesn't change when jobs are added. Add new jobs to its `needs` list.
 
