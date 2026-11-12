@@ -1,0 +1,68 @@
+# DE440 kernel tests: runs the mooncalc-spk tests that skip in CI without
+# MOONCALC_DE440, against NAIF's de440s.bsp (about 32 MB, cached).
+# Not part of ci-required. See docs/ci.md.
+#
+# Scheduled runs use the workflow file on the repository's default branch.
+
+name: DE440
+
+on:
+  schedule:
+    - cron: "17 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: de440-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  RUST_BACKTRACE: 1
+  KERNEL_URL: https://naif.jpl.nasa.gov/pub/naif/generic_kernels/spk/planets/de440s.bsp
+  # SHA-256 of de440s.bsp as published by NAIF (32726016 bytes,
+  # Last-Modified 2020-12-21), recorded 2026-11-11.
+  KERNEL_SHA256: c1c7feeab882263fc493a9d5a5b2ddd71b54826cdf65d8d17a76126b260a49f2
+
+jobs:
+  spk:
+    name: mooncalc-spk with de440s.bsp
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Restore kernel cache
+        id: kernel
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/kernels
+          key: de440s-${{ env.KERNEL_SHA256 }}
+      - name: Download de440s.bsp
+        if: steps.kernel.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p "$RUNNER_TEMP/kernels"
+          curl --fail --silent --show-error --location \
+            --retry 5 --retry-delay 10 --retry-all-errors \
+            --output "$RUNNER_TEMP/kernels/de440s.bsp" "$KERNEL_URL"
+      - name: Verify kernel checksum
+        run: echo "$KERNEL_SHA256  $RUNNER_TEMP/kernels/de440s.bsp" | sha256sum --check --strict
+      - name: Install Rust (rust-toolchain.toml)
+        run: rustup toolchain install stable --profile minimal --no-self-update
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - name: Test mooncalc-spk against the kernel
+        # Explicit bash adds pipefail, so a test failure fails the pipe to tee.
+        shell: bash
+        run: |
+          export MOONCALC_DE440="$RUNNER_TEMP/kernels/de440s.bsp"
+          cargo test -p mooncalc-spk -- --nocapture 2>&1 | tee "$RUNNER_TEMP/spk-test.log"
+          # The kernel tests print this notice and pass when the variable is
+          # missing; fail if any of them skipped.
+          if grep -q "skipping DE440 test" "$RUNNER_TEMP/spk-test.log"; then
+            echo "::error::DE440 tests skipped although MOONCALC_DE440 is set"
+            exit 1
+          fi

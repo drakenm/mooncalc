@@ -1,0 +1,6 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "MoonCalc DE440",
+  "mainBinaryName": "mooncalc-tauri-de440",
+  "identifier": "org.mooncalc.app.de440"
+}

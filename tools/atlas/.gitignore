@@ -1,0 +1,3 @@
+# Raw GeoNames downloads (not committed; see README.md).
+download/
+__pycache__/

@@ -1,0 +1,36 @@
+[package]
+name = "mooncalc-tauri"
+description = "MoonCalc desktop shell (Tauri 2 + TypeScript frontend in frontend/tauri/)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+# Distinct from the binary name: a lib and bin sharing one name collide on
+# Windows debug-info (.pdb) output files.
+name = "mooncalc_tauri_lib"
+path = "src/lib.rs"
+
+[[bin]]
+name = "mooncalc-tauri"
+path = "src/main.rs"
+
+[features]
+default = []
+# Serve the built frontend (frontend/tauri/dist) from the binary instead of the
+# Vite dev server. `tauri build` turns this on itself; enable it by hand for a
+# standalone `cargo build`.
+custom-protocol = ["tauri/custom-protocol"]
+# Use JPL DE440/DE440s files (chosen at runtime by path) besides the built-in
+# Meeus/ELP theory.
+de440 = ["mooncalc-app/de440"]
+
+[dependencies]
+mooncalc-app.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tauri.workspace = true
+
+[build-dependencies]
+tauri-build.workspace = true

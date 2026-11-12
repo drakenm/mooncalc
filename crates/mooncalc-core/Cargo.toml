@@ -1,0 +1,9 @@
+[package]
+name = "mooncalc-core"
+description = "Astronomical core for MoonCalc: time scales, coordinate frames, Sun/Moon ephemerides, rise/set, phases."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]

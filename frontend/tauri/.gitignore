@@ -1,0 +1,5 @@
+node_modules/
+# Vite build output. crates/mooncalc-tauri/build.rs writes a placeholder
+# index.html here when it is missing, so cargo builds work without npm.
+dist/
+*.local

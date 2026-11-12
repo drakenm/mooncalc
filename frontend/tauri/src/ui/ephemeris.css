@@ -1,0 +1,238 @@
+/* Ephemeris tab. */
+
+.ephemeris-view {
+  max-width: none;
+}
+
+.subtabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.subtab {
+  padding: 6px 12px;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.subtab:hover {
+  color: var(--text);
+}
+
+.subtab[aria-selected='true'] {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+  font-weight: 600;
+}
+
+.eph-toolbar {
+  flex-wrap: wrap;
+  padding: 4px 0 8px;
+}
+
+.eph-toolbar .inline input[type='checkbox'] {
+  width: auto;
+}
+
+.eph-toolbar select {
+  width: auto;
+}
+
+.dt-input {
+  width: auto;
+}
+
+.num-input {
+  width: 80px;
+}
+
+.table-wrap {
+  overflow-x: auto;
+}
+
+.eph-table {
+  margin-top: 4px;
+  white-space: nowrap;
+}
+
+.eph-table tbody tr {
+  cursor: default;
+}
+
+.eph-table .angle {
+  font-size: 11px;
+}
+
+.eph-table tr.below td {
+  color: var(--text-muted);
+}
+
+.eph-table tr.extreme td {
+  font-weight: 600;
+}
+
+.riseset-table thead tr:first-child th {
+  text-align: center;
+  border-bottom: none;
+}
+
+.columns-picker {
+  position: relative;
+}
+
+.columns-picker summary {
+  list-style: none;
+  display: inline-block;
+}
+
+.columns-picker summary::-webkit-details-marker {
+  display: none;
+}
+
+.columns-menu {
+  position: absolute;
+  z-index: 10;
+  top: calc(100% + 4px);
+  left: 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(150px, 1fr));
+  gap: 6px 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: 0 6px 24px rgb(0 0 0 / 0.18);
+}
+
+.columns-menu fieldset {
+  margin: 0;
+  padding: 0;
+  border: none;
+}
+
+.columns-menu legend {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.columns-menu label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.columns-menu input {
+  width: auto;
+}
+
+.apsides-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 0 24px;
+  align-items: start;
+}
+
+.apsides-grid h3,
+.eclipse-details h3,
+.ephemeris-view h3 {
+  font-size: 15px;
+  margin: 14px 0 6px;
+}
+
+.apsides-grid .wide {
+  grid-column: 1 / -1;
+}
+
+.eclipse-layout {
+  display: grid;
+  grid-template-columns: minmax(420px, 1fr) minmax(380px, 1fr);
+  gap: 24px;
+  align-items: start;
+}
+
+.eclipse-list .eph-table tbody tr {
+  cursor: pointer;
+}
+
+.eclipse-icon.solar {
+  color: #d97706;
+}
+
+.eclipse-icon.lunar {
+  color: #6366f1;
+}
+
+.eclipse-details .kv th {
+  width: 46%;
+}
+
+.eclipse-details .contacts {
+  margin-bottom: 10px;
+}
+
+.seasons-table {
+  max-width: 560px;
+}
+
+.eot-chart {
+  width: 100%;
+  max-width: 820px;
+  height: auto;
+}
+
+.eot-chart .grid {
+  stroke: var(--border);
+  stroke-width: 1;
+}
+
+.eot-chart .axis {
+  stroke: var(--text-muted);
+  stroke-width: 1;
+}
+
+.eot-chart .tick {
+  fill: var(--text-muted);
+  font-size: 11px;
+}
+
+.eot-chart .line {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+
+.eot-chart .mark {
+  fill: var(--surface);
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+
+.spinner {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  vertical-align: -1px;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.year-row {
+  align-items: center;
+}

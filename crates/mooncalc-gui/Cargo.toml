@@ -1,0 +1,33 @@
+[package]
+name = "mooncalc-gui"
+description = "MoonCalc desktop application (egui)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "mooncalc"
+path = "src/main.rs"
+
+[features]
+default = []
+# Use JPL DE440/DE440s files (chosen at runtime) instead of the built-in Meeus/ELP theory.
+de440 = ["dep:mooncalc-spk"]
+
+[dependencies]
+mooncalc-core.workspace = true
+mooncalc-visibility.workspace = true
+mooncalc-maps.workspace = true
+mooncalc-hijri.workspace = true
+mooncalc-atlas.workspace = true
+mooncalc-app.workspace = true
+mooncalc-spk = { workspace = true, optional = true }
+eframe.workspace = true
+egui.workspace = true
+egui_extras.workspace = true
+rfd.workspace = true
+serde.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
