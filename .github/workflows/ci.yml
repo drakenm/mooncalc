@@ -1,0 +1,160 @@
+# Continuous integration: the required checks from AGENTS.md.
+# Job descriptions and local reproduction steps: docs/ci.md.
+#
+# Third-party actions are pinned to full commit SHAs of releases at least
+# 14 days old at adoption (AGENTS.md dependency rule). No secrets are used.
+
+name: CI
+
+on:
+  push:
+    branches: [master, "feature/**", "release/v*"]
+  pull_request:
+    branches: [master, "feature/**", "release/v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  RUST_BACKTRACE: 1
+  # System libraries that Linux builds link through pkg-config, taken from the
+  # -sys crates in Cargo.lock: webkit2gtk-sys, soup3-sys and
+  # javascriptcore-rs-sys (Tauri's webview; this package pulls in the GTK 3,
+  # GLib, Cairo, Pango, ATK and GdkPixbuf headers), gtk-sys, libdbus-sys (tao),
+  # x11 (gdkx11-sys) and yeslogic-fontconfig-sys (egui system fonts).
+  # eframe's winit/glutin stack dlopens X11, Wayland, xkbcommon and EGL, and
+  # libappindicator-sys dlopens its library, so those need no build headers.
+  # No crate links OpenSSL or librsvg.
+  LINUX_BUILD_DEPS: >-
+    libwebkit2gtk-4.1-dev
+    libgtk-3-dev
+    libdbus-1-dev
+    libx11-dev
+    libfontconfig-dev
+
+jobs:
+  fmt:
+    name: fmt
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install Rust (rust-toolchain.toml)
+        run: rustup toolchain install stable --profile minimal --component rustfmt --no-self-update
+      - run: cargo fmt --all -- --check
+
+  clippy:
+    name: clippy
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install system libraries
+        run: |
+          sudo apt-get update
+          # shellcheck disable=SC2086 # split the package list into words
+          sudo apt-get install -y --no-install-recommends $LINUX_BUILD_DEPS
+      - name: Install Rust (rust-toolchain.toml)
+        run: rustup toolchain install stable --profile minimal --component clippy --no-self-update
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: ${{ github.event_name != 'pull_request' }}
+      - name: Clippy (workspace, default features)
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Clippy (de440 feature)
+        run: cargo clippy -p mooncalc-gui -p mooncalc-app -p mooncalc-tauri --all-targets --features de440 -- -D warnings
+
+  test:
+    name: test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install system libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          # shellcheck disable=SC2086 # split the package list into words
+          sudo apt-get install -y --no-install-recommends $LINUX_BUILD_DEPS
+      - name: Install Rust (rust-toolchain.toml)
+        run: rustup toolchain install stable --profile minimal --no-self-update
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: ${{ github.event_name != 'pull_request' }}
+      # DE440 kernel tests in mooncalc-spk skip without MOONCALC_DE440; the
+      # separate DE440 workflow (de440.yml) runs them against de440s.bsp.
+      - run: cargo test --workspace
+
+  wasm:
+    name: wasm
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install Rust (rust-toolchain.toml) with the wasm target
+        run: rustup toolchain install stable --profile minimal --target wasm32-unknown-unknown --no-self-update
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: ${{ github.event_name != 'pull_request' }}
+      - name: Build portable crates for wasm32
+        run: cargo build --target wasm32-unknown-unknown -p mooncalc-core -p mooncalc-visibility -p mooncalc-maps -p mooncalc-hijri -p mooncalc-atlas -p mooncalc-app
+
+  frontend:
+    name: frontend
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: frontend/tauri
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/tauri/package-lock.json
+      - run: npm ci
+      - run: npm run build
+      - run: npm run check
+
+  # Single check for branch protection: passes only when every job above
+  # succeeded. Runs even when a dependency failed or was cancelled, so the
+  # check reports a failure rather than staying skipped.
+  ci-required:
+    name: ci-required
+    if: always()
+    needs: [fmt, clippy, test, wasm, frontend]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check job results
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          echo "$RESULTS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+          failed=$(echo "$RESULTS" | jq -r '[to_entries[] | select(.value.result != "success") | .key] | join(", ")')
+          if [ -n "$failed" ]; then
+            echo "::error::Required jobs did not succeed: $failed"
+            exit 1
+          fi

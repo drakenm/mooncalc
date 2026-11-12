@@ -1,0 +1,11 @@
+[package]
+name = "mooncalc-visibility"
+description = "Crescent visibility: observing circumstances (best time, ARCV, width, ...) and sighting criteria (Yallop, Odeh, SAAO, Danjon, ...)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+mooncalc-core.workspace = true
+mooncalc-hijri.workspace = true

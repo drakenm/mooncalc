@@ -1,0 +1,10 @@
+[package]
+name = "mooncalc-spk"
+description = "Reader for JPL SPICE SPK (DAF) ephemeris files such as DE440/DE440s, plus the DE440 Ephemeris backend."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+mooncalc-core.workspace = true

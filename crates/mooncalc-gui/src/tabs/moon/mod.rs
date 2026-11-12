@@ -1,0 +1,532 @@
+//! **Moon** tab: a close-up of the Moon at the app time and location.
+//!
+//! * [`disc`]: the lunar disc with the correct phase (terminator from the
+//!   Sun's selenographic longitude and latitude), orientation (axis
+//!   position angle P; north up, or zenith up via the parallactic angle)
+//!   and libration, with the feature layer of [`features`].
+//! * [`libration_graph`]: libration in longitude against latitude through
+//!   the current lunation.
+//! * A data panel: illumination, phase, age, distance, apparent diameter,
+//!   libration, P, colongitude, and the next sunrise/sunset at a chosen
+//!   crater (Meeus ch. 53, `mooncalc_core::libration::lunar_sunrise`).
+
+use mooncalc_atlas::Zone;
+use mooncalc_core::angle::{DEG, norm_2pi};
+use mooncalc_core::libration::{MoonPhysical, sun_altitude_on_moon};
+use mooncalc_core::tables::{EphemerisRow, TableOptions, ephemeris_row};
+use mooncalc_core::{Ephemeris, Instant};
+
+// The UI-independent Moon machinery (features, disc projection, libration
+// curve, lunar sunrise) lives in `mooncalc_app::moon`, shared with the
+// Tauri frontend.
+use serde::{Deserialize, Serialize};
+
+use super::TabContext;
+use super::ephemeris::format::{self, AngleStyle};
+use super::ephemeris::{EphKey, LUNATION_MARGIN, ephemeris, set_app_time, time_link};
+use crate::widgets::coverage::coverage_notice;
+
+pub mod disc;
+pub mod libration_graph;
+
+/// Named craters and schematic maria, shared with the Tauri frontend.
+pub use mooncalc_app::moon::features;
+
+/// Persisted choices of the Moon tab.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MoonSettings {
+    /// Rotate the view so the observer's zenith is up (else north up).
+    pub zenith_up: bool,
+    /// Librations, P and illumination as seen from the app location.
+    pub topocentric: bool,
+    pub show_maria: bool,
+    pub show_craters: bool,
+    pub show_labels: bool,
+    /// Crater for the lunar sunrise/sunset times.
+    pub crater: String,
+}
+
+impl Default for MoonSettings {
+    fn default() -> Self {
+        Self {
+            zenith_up: false,
+            topocentric: true,
+            show_maria: true,
+            show_craters: true,
+            show_labels: true,
+            crater: "Copernicus".into(),
+        }
+    }
+}
+
+/// Parallactic angle q (Meeus eq. 14.1), shared with the Sky tab.
+pub use mooncalc_app::sky::geometry::parallactic_angle;
+
+/// Lunar sunrise/sunset at a crater after an instant (Meeus ch. 53).
+pub use mooncalc_app::moon::next_lunar_sun_event;
+
+/// Name of the phase from the elongation in longitude λ☾ − λ☉ (radians):
+/// the principal phases within ±6° (about half a day); see
+/// [`mooncalc_app::sky::geometry::phase_name`].
+pub fn phase_name(elong_lon: f64) -> &'static str {
+    mooncalc_app::sky::geometry::phase_name(elong_lon / DEG)
+}
+
+/// Everything the tab shows for one instant and observer.
+struct MoonState {
+    row: EphemerisRow,
+    /// Parallactic angle at the Moon, radians.
+    q: f64,
+    /// Elongation in longitude, radians.
+    elong_lon: f64,
+    crater: Option<CraterEvents>,
+    /// Whether the ephemeris covers the lunation around the instant: the
+    /// age, the libration curve and the crater's next sunrise and sunset
+    /// need the new Moons and events up to a month away.
+    lunation_covered: bool,
+}
+
+struct CraterEvents {
+    name: String,
+    sun_alt: f64,
+    sunrise: Option<Instant>,
+    sunset: Option<Instant>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct StateKey {
+    jd_ut: f64,
+    location: (f64, f64, f64),
+    crater: String,
+    eph: EphKey,
+}
+
+/// Quantised view geometry and texture size, to reuse the texture.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct TextureKey {
+    view: [i64; 5],
+    size: usize,
+    maria: bool,
+}
+
+/// State of the Moon tab.
+#[derive(Default)]
+pub struct MoonTab {
+    state: Option<(StateKey, MoonState)>,
+    curve: Option<libration_graph::LunationCurve>,
+    texture: Option<(TextureKey, egui::TextureHandle)>,
+}
+
+impl MoonTab {
+    fn update(&mut self, tc: &TabContext<'_>, eph: &dyn Ephemeris, lunation_covered: bool) {
+        let s = &*tc.settings;
+        let l = &s.location;
+        let key = StateKey {
+            jd_ut: s.time.jd_ut,
+            location: (l.lat_deg, l.lon_deg, l.elevation_m),
+            crater: s.moon_tab.crater.clone(),
+            eph: EphKey::of(s),
+        };
+        if self.state.as_ref().is_some_and(|(k, _)| *k == key) {
+            return;
+        }
+        let instant = s.instant();
+        let loc = s.observer();
+        let opts = TableOptions {
+            location: Some(loc),
+            ..TableOptions::default()
+        };
+        let row = ephemeris_row(eph, instant, &opts);
+        let topo = row.moon.topocentric.expect("location given");
+        let lst = instant.local_apparent_sidereal_time(loc.lon_deg * DEG);
+        let q = parallactic_angle(
+            lst - topo.equatorial.ra,
+            topo.equatorial.dec,
+            loc.lat_deg * DEG,
+        );
+        let elong_lon = row.moon.ecliptic.lon - row.sun.ecliptic.lon;
+        let crater = features::CRATERS
+            .iter()
+            .filter(|_| lunation_covered)
+            .find(|c| c.name == key.crater)
+            .map(|c| {
+                let (eta, theta) = (c.lon * DEG, c.lat * DEG);
+                let p = row.physical;
+                CraterEvents {
+                    name: c.name.to_string(),
+                    sun_alt: sun_altitude_on_moon(eta, theta, p.sun_lon, p.sun_lat),
+                    sunrise: next_lunar_sun_event(eph, eta, theta, row.jd_tt, true)
+                        .map(Instant::from_jd_tt),
+                    sunset: next_lunar_sun_event(eph, eta, theta, row.jd_tt, false)
+                        .map(Instant::from_jd_tt),
+                }
+            });
+        if !lunation_covered {
+            // Its new Moons would be NaN, and `contains` never true.
+            self.curve = None;
+        } else if !self.curve.as_ref().is_some_and(|c| c.contains(instant)) {
+            self.curve = Some(libration_graph::LunationCurve::around(eph, instant));
+        }
+        self.state = Some((
+            key,
+            MoonState {
+                row,
+                q,
+                elong_lon,
+                crater,
+                lunation_covered,
+            },
+        ));
+    }
+
+    pub fn ui(&mut self, ui: &mut egui::Ui, tc: &mut TabContext<'_>) {
+        let active = crate::backend::resolve(tc.settings.backend, &tc.settings.de440_path);
+        let jd = tc.settings.time.jd_ut;
+        // The row needs the instant (and light time); a day either side.
+        if let Some(problem) = active.span_problem(jd, jd, 1.0, 1.0) {
+            ui.heading("Moon close-up");
+            coverage_notice(ui, &problem);
+            return;
+        }
+        let lunation_covered = active
+            .span_problem(jd, jd, LUNATION_MARGIN, LUNATION_MARGIN)
+            .is_none();
+        let eph = ephemeris(tc.settings);
+        self.update(tc, eph.as_ref(), lunation_covered);
+        let Some((_, st)) = self.state.as_ref() else {
+            return;
+        };
+        let ms = tc.settings.moon_tab.clone();
+        let physical: MoonPhysical = if ms.topocentric {
+            st.row.topocentric_physical.unwrap_or(st.row.physical)
+        } else {
+            st.row.physical
+        };
+        let rotation = physical.libration.position_angle - if ms.zenith_up { st.q } else { 0.0 };
+        let view = disc::View {
+            l: physical.libration.lon,
+            b: physical.libration.lat,
+            sun_lon: physical.sun_lon,
+            sun_lat: physical.sun_lat,
+            rotation,
+        };
+        let mut clicked: Option<Instant> = None;
+
+        egui::Panel::right("moon_side")
+            .resizable(true)
+            .default_size(380.0)
+            .min_size(300.0)
+            .show(ui, |ui| {
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    let ms = &mut tc.settings.moon_tab;
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label("Orientation:");
+                        ui.selectable_value(&mut ms.zenith_up, false, "North up");
+                        ui.selectable_value(&mut ms.zenith_up, true, "Zenith up")
+                            .on_hover_text("Rotate by the parallactic angle: as seen in the sky");
+                    });
+                    ui.horizontal_wrapped(|ui| {
+                        ui.checkbox(&mut ms.topocentric, "Topocentric")
+                            .on_hover_text(
+                                "Librations, axis angle and illumination as seen from the app \
+                             location (else geocentric)",
+                            );
+                        ui.checkbox(&mut ms.show_maria, "Maria");
+                        ui.checkbox(&mut ms.show_craters, "Craters");
+                        ui.checkbox(&mut ms.show_labels, "Labels");
+                    });
+                    ui.separator();
+                    data_grid(
+                        ui,
+                        st,
+                        &physical,
+                        ms.topocentric,
+                        tc.settings.time.zone(),
+                    );
+                    ui.separator();
+                    clicked = crater_ui(ui, st, tc);
+                    ui.separator();
+                    ui.strong("Libration through this lunation (geocentric)");
+                    if !st.lunation_covered {
+                        ui.weak(
+                            "Not shown: the lunation around this date extends beyond the                              ephemeris coverage.",
+                        );
+                    }
+                    if let Some(curve) = &self.curve {
+                        let now = libration_graph::lb_deg(eph.as_ref(), tc.settings.instant());
+                        let w = ui.available_width().clamp(240.0, 420.0);
+                        libration_graph::show(ui, egui::vec2(w, w * 0.9), curve, eph.as_ref(), now);
+                        let tz = tc.settings.time.zone();
+                        ui.weak(format!(
+                            "New Moon {} → {}",
+                            format::date_time(curve.new_moon, tz),
+                            format::date_time(curve.next_new_moon, tz)
+                        ));
+                    }
+                });
+            });
+
+        disc_ui(&mut self.texture, ui, tc, &view, st.q);
+        if let Some(t) = clicked {
+            set_app_time(tc, t);
+        }
+    }
+}
+
+/// Draw the disc, its overlay and the sky directions into the rest of `ui`.
+fn disc_ui(
+    texture: &mut Option<(TextureKey, egui::TextureHandle)>,
+    ui: &mut egui::Ui,
+    tc: &TabContext<'_>,
+    view: &disc::View,
+    q: f64,
+) {
+    let ms = &tc.settings.moon_tab;
+    let tz = tc.settings.time.zone();
+    ui.horizontal_wrapped(|ui| {
+        ui.heading("Moon close-up");
+        ui.label(format!(
+            "{} {} — {}",
+            format::date_time(tc.settings.instant(), tz),
+            format::zone_label(tz),
+            tc.settings.location.name
+        ));
+    });
+    let rect = ui.available_rect_before_wrap();
+    let radius = (rect.width().min(rect.height()) / 2.0 / 1.55).max(40.0);
+    let (rect, _) = ui.allocate_exact_size(rect.size(), egui::Sense::hover());
+    let center = rect.center();
+    let painter = ui.painter_at(rect);
+
+    let ppp = ui.ctx().pixels_per_point();
+    let size = ((2.0 * radius * ppp) as usize).clamp(64, 512);
+    let quant = |a: f64| (a / (0.02 * DEG)).round() as i64;
+    let key = TextureKey {
+        view: [
+            quant(view.l),
+            quant(view.b),
+            quant(view.sun_lon),
+            quant(view.sun_lat),
+            quant(view.rotation),
+        ],
+        size,
+        maria: ms.show_maria,
+    };
+    if texture.as_ref().is_none_or(|(k, _)| *k != key) {
+        let image = disc::rasterize(view, size, ms.show_maria);
+        let tex = ui
+            .ctx()
+            .load_texture("moon_disc", image, egui::TextureOptions::LINEAR);
+        *texture = Some((key, tex));
+    }
+    if let Some((_, tex)) = texture.as_ref() {
+        painter.image(
+            tex.id(),
+            egui::Rect::from_center_size(center, egui::vec2(2.0 * radius, 2.0 * radius)),
+            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+            egui::Color32::WHITE,
+        );
+    }
+    disc::draw_overlay(
+        &painter,
+        view,
+        center,
+        radius,
+        &disc::Overlay {
+            maria: ms.show_maria,
+            craters: ms.show_craters,
+            labels: ms.show_labels,
+            highlight: Some(ms.crater.as_str()),
+        },
+    );
+    let sky = ui.visuals().text_color();
+    let weak = ui.visuals().weak_text_color();
+    let offset = if ms.zenith_up { -q } else { 0.0 };
+    if ms.zenith_up {
+        disc::draw_direction(&painter, center, radius, 0.0, "Zenith", weak);
+    }
+    disc::draw_direction(&painter, center, radius, offset, "N", sky);
+    disc::draw_direction(&painter, center, radius, offset + 90.0 * DEG, "E", sky);
+    painter.text(
+        rect.left_bottom() + egui::vec2(4.0, -4.0),
+        egui::Align2::LEFT_BOTTOM,
+        "Naked-eye view (east left of north). Green cross: mean centre (0°, 0°); Np: lunar \
+             north pole. Mare outlines are schematic.",
+        egui::FontId::proportional(11.0),
+        weak,
+    );
+}
+
+fn data_grid(ui: &mut egui::Ui, st: &MoonState, p: &MoonPhysical, topocentric: bool, tz: Zone) {
+    let r = &st.row;
+    let illum = if topocentric {
+        r.topocentric_illumination.unwrap_or(r.illumination)
+    } else {
+        r.illumination
+    };
+    let topo = r.moon.topocentric.expect("location given");
+    let style = AngleStyle::Sexagesimal;
+    let rows: Vec<(&str, String)> = vec![
+        ("Phase", phase_name(st.elong_lon).to_string()),
+        ("Illuminated", format!("{:.1} %", illum.fraction * 100.0)),
+        (
+            "Age",
+            if r.moon_age_days.is_finite() {
+                format!("{:.2} days", r.moon_age_days)
+            } else {
+                "— (before the ephemeris coverage)".into()
+            },
+        ),
+        (
+            "Last new Moon",
+            if r.conjunction_jd_tt.is_finite() {
+                format::date_time(Instant::from_jd_tt(r.conjunction_jd_tt), tz)
+            } else {
+                "—".into()
+            },
+        ),
+        ("Elongation", format!("{:.2}°", illum.elongation / DEG)),
+        ("Phase angle", format!("{:.2}°", illum.phase_angle / DEG)),
+        (
+            "Distance (geocentric)",
+            format!("{:.0} km", r.moon.equatorial.distance_km),
+        ),
+        (
+            "Distance (topocentric)",
+            format!("{:.0} km", topo.equatorial.distance_km),
+        ),
+        (
+            "Apparent diameter",
+            format::small_angle(2.0 * topo.semidiameter, style),
+        ),
+        (
+            "Libration l, b",
+            format!(
+                "{:+.2}°, {:+.2}°",
+                p.libration.lon / DEG,
+                p.libration.lat / DEG
+            ),
+        ),
+        (
+            "Axis position angle P",
+            format!("{:.2}°", p.libration.position_angle / DEG),
+        ),
+        (
+            "Bright limb χ",
+            format!(
+                "{:.1}° (from zenith {:.1}°)",
+                illum.bright_limb_angle / DEG,
+                norm_2pi(illum.bright_limb_angle - st.q) / DEG
+            ),
+        ),
+        ("Parallactic angle q", format!("{:+.1}°", st.q / DEG)),
+        ("Colongitude", format!("{:.2}°", p.colongitude / DEG)),
+        ("Subsolar latitude", format!("{:+.2}°", p.sun_lat / DEG)),
+        (
+            "Altitude, azimuth",
+            format!(
+                "{}, {}",
+                format::signed_angle(topo.apparent_altitude, AngleStyle::Decimal),
+                format::angle_360(topo.horizontal.az, AngleStyle::Decimal)
+            ),
+        ),
+    ];
+    egui::Grid::new("moon_data")
+        .num_columns(2)
+        .striped(true)
+        .show(ui, |ui| {
+            for (k, v) in rows {
+                ui.label(k);
+                ui.monospace(v);
+                ui.end_row();
+            }
+        });
+    ui.weak(if topocentric {
+        "Librations, P and illumination: topocentric (app location)."
+    } else {
+        "Librations, P and illumination: geocentric."
+    });
+}
+
+fn crater_ui(ui: &mut egui::Ui, st: &MoonState, tc: &mut TabContext<'_>) -> Option<Instant> {
+    let tz = tc.settings.time.zone();
+    let mut clicked = None;
+    ui.horizontal(|ui| {
+        ui.label("Crater:");
+        egui::ComboBox::from_id_salt("moon_crater")
+            .selected_text(tc.settings.moon_tab.crater.clone())
+            .height(320.0)
+            .show_ui(ui, |ui| {
+                let mut names: Vec<&str> = features::CRATERS.iter().map(|c| c.name).collect();
+                names.sort_unstable();
+                for n in names {
+                    ui.selectable_value(&mut tc.settings.moon_tab.crater, n.to_string(), n);
+                }
+            });
+    });
+    let Some(c) = &st.crater else {
+        ui.weak(if st.lunation_covered {
+            "Unknown crater."
+        } else {
+            "Sunrise and sunset not computed: the month ahead extends beyond the ephemeris              coverage."
+        });
+        return None;
+    };
+    egui::Grid::new("crater_events")
+        .num_columns(2)
+        .show(ui, |ui| {
+            ui.label("Sun altitude");
+            let alt = c.sun_alt / DEG;
+            ui.monospace(format!(
+                "{alt:+.1}° ({})",
+                if alt > 0.0 { "day" } else { "night" }
+            ));
+            ui.end_row();
+            for (label, t) in [("Next sunrise", c.sunrise), ("Next sunset", c.sunset)] {
+                ui.label(label);
+                match t {
+                    Some(t) => {
+                        if time_link(ui, format::date_time(t, tz)) {
+                            clicked = Some(t);
+                        }
+                    }
+                    None => {
+                        ui.weak("—");
+                    }
+                }
+                ui.end_row();
+            }
+        });
+    ui.weak(format!("Sun on the horizon at {} (Meeus ch. 53).", c.name));
+    clicked
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parallactic_angle_signs() {
+        // On the meridian q = 0; west of it (H > 0) q > 0 for a northern
+        // observer looking south; at the pole-facing side q = 180°.
+        let lat = 40.0 * DEG;
+        assert!(parallactic_angle(0.0, 10.0 * DEG, lat).abs() < 1e-12);
+        assert!(parallactic_angle(0.5, 10.0 * DEG, lat) > 0.0);
+        assert!(parallactic_angle(-0.5, 10.0 * DEG, lat) < 0.0);
+        assert!(
+            (parallactic_angle(0.0, 60.0 * DEG, lat).abs() - std::f64::consts::PI).abs() < 1e-12
+        );
+    }
+
+    #[test]
+    fn phase_names() {
+        assert_eq!(phase_name(0.0), "New Moon");
+        assert_eq!(phase_name(-3.0 * DEG), "New Moon");
+        assert_eq!(phase_name(30.0 * DEG), "Waxing crescent");
+        assert_eq!(phase_name(90.0 * DEG), "First quarter");
+        assert_eq!(phase_name(180.0 * DEG), "Full Moon");
+        assert_eq!(phase_name(-90.0 * DEG), "Last quarter");
+        assert_eq!(phase_name(-30.0 * DEG), "Waning crescent");
+    }
+}

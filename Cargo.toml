@@ -1,0 +1,53 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/mooncalc-core",
+    "crates/mooncalc-visibility",
+    "crates/mooncalc-maps",
+    "crates/mooncalc-hijri",
+    "crates/mooncalc-atlas",
+    "crates/mooncalc-spk",
+    "crates/mooncalc-app",
+    "crates/mooncalc-gui",
+    "crates/mooncalc-tauri",
+]
+default-members = ["crates/mooncalc-gui"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/drakenm/mooncalc"
+rust-version = "1.90"
+
+[workspace.dependencies]
+mooncalc-core = { path = "crates/mooncalc-core" }
+mooncalc-visibility = { path = "crates/mooncalc-visibility" }
+mooncalc-maps = { path = "crates/mooncalc-maps" }
+mooncalc-hijri = { path = "crates/mooncalc-hijri" }
+mooncalc-atlas = { path = "crates/mooncalc-atlas" }
+mooncalc-spk = { path = "crates/mooncalc-spk" }
+mooncalc-app = { path = "crates/mooncalc-app" }
+
+# Third-party pins (released >= 14 days before adoption; see AGENTS.md).
+eframe = { version = "=0.37.0", features = ["persistence"] }
+# IANA time-zone rules (mooncalc-atlas::tz): jiff evaluates them, jiff-tzdb
+# embeds the database (bump jiff-tzdb for a new tzdata release). No `std`
+# features: nothing is read from the OS, so wasm32 gets the same data.
+jiff = { version = "=0.2.38", default-features = false, features = ["alloc", "tzdb-bundle-always"] }
+jiff-tzdb = "=0.1.9"
+egui = "=0.37.0"
+egui_extras = { version = "=0.37.0", default-features = false }
+png = "=0.18.1"
+# Native open/save dialogs for the egui app (0.18.0 is younger than 14 days).
+rfd = "=0.17.2"
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = "=1.0.154"
+tauri = { version = "=2.12.5", features = [] }
+tauri-build = { version = "=2.7.4", features = [] }
+
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.release]
+lto = "thin"
