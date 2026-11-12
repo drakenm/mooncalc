@@ -1,8 +1,8 @@
 # Continuous integration
 
-GitHub Actions runs the required checks from [AGENTS.md](../AGENTS.md) in [`.github/workflows/ci.yml`](../.github/workflows/ci.yml). A second workflow, [`.github/workflows/de440.yml`](../.github/workflows/de440.yml), runs the DE440 kernel tests on a schedule. Neither uses secrets. Both run with a read-only `GITHUB_TOKEN` (`permissions: contents: read`).
+GitHub Actions runs the required checks from [AGENTS.md](../AGENTS.md) in [`.github/workflows/ci.yml`](../.github/workflows/ci.yml). A second workflow, [`.github/workflows/de440.yml`](../.github/workflows/de440.yml), runs the DE440 kernel tests on a schedule. A third, [`.github/workflows/release.yml`](../.github/workflows/release.yml), builds the desktop apps and publishes them on version tags (see [Release builds](#release-builds)). None uses secrets. All run with a read-only `GITHUB_TOKEN` (`permissions: contents: read`), except the release job that creates the GitHub release.
 
-There is no release or deployment workflow yet. The staging and production steps in the AGENTS.md release flow are still manual.
+MoonCalc is a desktop application, so nothing is deployed. In the AGENTS.md release flow, the `-rcN` pre-release takes the place of staging: its downloads are what gets tested, and the final `vX.Y.Z` tag goes on the same commit.
 
 ## When CI runs
 
@@ -51,6 +51,55 @@ The tests in `crates/mooncalc-spk/tests/de440*.rs` need a JPL kernel. Without `M
 
 `de440.yml` runs them nightly (04:17 UTC) and on manual dispatch. It downloads `de440s.bsp` (32,726,016 bytes) from [NAIF](https://naif.jpl.nasa.gov/pub/naif/generic_kernels/spk/planets/), checks its SHA-256 against the value recorded in the workflow, and caches it. It then runs `cargo test -p mooncalc-spk` with `MOONCALC_DE440` set, and fails if any test still prints the skip notice. The job is not part of `ci-required`, so a NAIF outage can't block merges. GitHub runs scheduled workflows only from the default branch, so the nightly run starts once this file is on that branch. Until then, start it manually.
 
+## Release builds
+
+`release.yml` builds both desktop apps, in a standard and a DE440 variant, for two platforms:
+
+| Job | Runner | Output |
+| --- | --- | --- |
+| `version` | ubuntu-latest | The version label used in file names. On a tag, checks that the tag is `vX.Y.Z`, `vX.Y.Z-rcN` or `vX.Y.Z-hfN` and that `X.Y.Z` equals the workspace version in `Cargo.toml`. On a branch, the label is `X.Y.Z-dev.<short SHA>`. |
+| `build (linux, standard\|de440)` | ubuntu-22.04 | egui `.tar.gz`, Tauri `.deb` and `.AppImage` |
+| `build (windows, standard\|de440)` | windows-latest | egui `.zip`, Tauri NSIS `-setup.exe` and `.msi` |
+| `publish` | ubuntu-latest | Tags only. Downloads the files from the four build jobs, writes `SHA256SUMS.txt` and creates the GitHub release with `gh release create`. `-rcN` tags become pre-releases; other tags are marked latest. |
+
+### When it runs
+
+- Tags `v*`: build and publish.
+- Pushes to `release/v*` and manual runs: build only. The files stay on the run as workflow artifacts for 14 days, so a release branch can be tried before it is tagged.
+
+Linux builds use Ubuntu 22.04 (glibc 2.35), so the binaries also run on distributions older than the newest runner image.
+
+### Variants and file names
+
+Each build job runs `cargo build --release --locked -p mooncalc-gui`, then the Tauri CLI (`npm run tauri -- build --ci --bundles ...`), then [`tools/release/package.sh`](../tools/release/package.sh), which names the files:
+
+| File | Contents |
+| --- | --- |
+| `mooncalc-egui-<label>-<os>-x86_64.(zip\|tar.gz)` | egui app, `LICENSE.txt`, `README.txt` |
+| `mooncalc-tauri-<label>-windows-x86_64-setup.exe`, `.msi` | Tauri app installers |
+| `mooncalc-tauri-<label>-linux-x86_64.deb`, `.AppImage` | Tauri app packages |
+
+The DE440 variant adds `-de440` after `egui` or `tauri`. It builds with `--features de440`. Its Tauri bundle also takes [`crates/mooncalc-tauri/tauri.de440.conf.json`](../crates/mooncalc-tauri/tauri.de440.conf.json), which changes the product name, binary name and identifier, so both Tauri variants can be installed side by side. No JPL kernel is bundled: users download `de440s.bsp` from NAIF and pick it in the app.
+
+The Windows files are not code-signed. No secrets are involved.
+
+### Cutting a release
+
+1. Set `version` in `[workspace.package]` of `Cargo.toml` (and `frontend/tauri/package.json`) on the release branch.
+2. Merge the release branch into `master` and wait for `ci-required`.
+3. Tag the `master` merge commit and push the tag, e.g. `git tag -a v0.1.1-rc1 -m "MoonCalc 0.1.1-rc1"` then `git push origin v0.1.1-rc1`.
+
+A tag that doesn't match the workspace version fails the `version` job before anything is built.
+
+To reproduce one build locally (Windows, DE440 variant, from Git Bash):
+
+```sh
+(cd frontend/tauri && npm ci)
+cargo build --release --locked -p mooncalc-gui --features de440
+(cd frontend/tauri && npm run tauri -- build --ci --bundles nsis,msi --features de440 --config "$(pwd -W)/../../crates/mooncalc-tauri/tauri.de440.conf.json" -- --locked)
+tools/release/package.sh windows de440 0.1.1-test dist
+```
+
 ## Pinned actions
 
 Every third-party action is pinned to a full commit SHA, with the release in a comment. Each release was at least 14 days old when adopted (the dependency rule in AGENTS.md).
@@ -60,6 +109,8 @@ Every third-party action is pinned to a full commit SHA, with the release in a c
 | `actions/checkout` | v7.0.1 | `3d3c42e5aac5ba805825da76410c181273ba90b1` |
 | `actions/setup-node` | v7.1.0 | `949feb2413d6458794dcd2491c4babbbce0c15c1` |
 | `actions/cache` | v6.1.0 | `55cc8345863c7cc4c66a329aec7e433d2d1c52a9` |
+| `actions/upload-artifact` | v7.0.2 | `cf430e030ddbb5b0abf93d22962f4752f3646cd9` |
+| `actions/download-artifact` | v8.0.2 | `9000827ccba6bdab643e8b6fd33ac0654aef8333` |
 | `Swatinem/rust-cache` | v2.9.3 | `d1527c8f67ef9af357290475d4af4b0fab8f12e0` |
 
 To update a pin, choose a release at least 14 days old and resolve its tag to a commit. An annotated tag needs a second lookup:

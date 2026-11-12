@@ -1,0 +1,211 @@
+# Release builds: both desktop apps (egui and Tauri), standard and DE440,
+# for Linux x86_64 and Windows x86_64. Pushing a v* tag publishes them as a
+# GitHub release; pushes to release/v* and manual runs only build them and
+# keep the files as workflow artifacts for testing.
+# Job descriptions and file names: docs/ci.md.
+#
+# Third-party actions are pinned to full commit SHAs of releases at least
+# 14 days old at adoption (AGENTS.md dependency rule). No secrets are used;
+# only the publish job gets write access, to create the release.
+
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+    branches: ["release/v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  # Never cancel a tag build halfway through publishing.
+  cancel-in-progress: ${{ github.ref_type != 'tag' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  # ci.yml's LINUX_BUILD_DEPS plus what Tauri's deb and AppImage bundlers use:
+  # librsvg2-dev (the AppImage GTK plugin bundles the SVG pixbuf loader),
+  # patchelf (linuxdeploy) and file.
+  LINUX_RELEASE_DEPS: >-
+    libwebkit2gtk-4.1-dev
+    libgtk-3-dev
+    libdbus-1-dev
+    libx11-dev
+    libfontconfig-dev
+    librsvg2-dev
+    patchelf
+    file
+
+jobs:
+  # The version in file names. A tag must match the workspace version:
+  # v0.1.1, v0.1.1-rc1 and v0.1.1-hf301 all need version = "0.1.1".
+  version:
+    name: version
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      label: ${{ steps.label.outputs.label }}
+      prerelease: ${{ steps.label.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: label
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          version=$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["workspace"]["package"]["version"])')
+          prerelease=false
+          if [ "$REF_TYPE" = tag ]; then
+            if ! [[ "$REF_NAME" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)(-(rc[0-9]+|hf[0-9]+))?$ ]]; then
+              echo "::error::Tag $REF_NAME is not vX.Y.Z, vX.Y.Z-rcN or vX.Y.Z-hfN"
+              exit 1
+            fi
+            if [ "${BASH_REMATCH[1]}" != "$version" ]; then
+              echo "::error::Tag $REF_NAME does not match the workspace version $version (Cargo.toml)"
+              exit 1
+            fi
+            label=${REF_NAME#v}
+            [[ "$REF_NAME" == *-rc* ]] && prerelease=true
+          else
+            label="$version-dev.${GITHUB_SHA::7}"
+          fi
+          echo "Version label: $label (prerelease: $prerelease)"
+          echo "label=$label" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: build (${{ matrix.os }}, ${{ matrix.variant }})
+    needs: version
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [linux, windows]
+        variant: [standard, de440]
+        include:
+          # Ubuntu 22.04 (glibc 2.35) so the binaries also run on older
+          # distributions than the newest runner image.
+          - os: linux
+            runner: ubuntu-22.04
+            bundles: deb,appimage
+          - os: windows
+            runner: windows-latest
+            bundles: nsis,msi
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install system libraries
+        if: matrix.os == 'linux'
+        run: |
+          sudo apt-get update
+          # shellcheck disable=SC2086 # split the package list into words
+          sudo apt-get install -y --no-install-recommends $LINUX_RELEASE_DEPS
+      - name: Install Rust (rust-toolchain.toml)
+        run: rustup toolchain install stable --profile minimal --no-self-update
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: release-${{ matrix.variant }}
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/tauri/package-lock.json
+      - name: Install frontend packages
+        working-directory: frontend/tauri
+        run: npm ci
+      - name: Build the egui app
+        env:
+          VARIANT: ${{ matrix.variant }}
+        run: |
+          features=()
+          [ "$VARIANT" = de440 ] && features=(--features de440)
+          cargo build --release --locked -p mooncalc-gui "${features[@]}"
+      - name: Build and bundle the Tauri app
+        working-directory: frontend/tauri
+        env:
+          BUNDLES: ${{ matrix.bundles }}
+          VARIANT: ${{ matrix.variant }}
+        # tauri.conf.json's beforeBuildCommand builds the frontend first.
+        # Arguments after the second -- go to cargo. The DE440 build gets its
+        # own product name, binary and identifier, so both Tauri builds can
+        # be installed side by side.
+        run: |
+          # A restored cache could hold installers from an earlier version;
+          # package.sh expects exactly one file per format.
+          rm -rf ../../target/release/bundle
+          args=(build --ci --bundles "$BUNDLES")
+          if [ "$VARIANT" = de440 ]; then
+            args+=(--features de440 --config "$GITHUB_WORKSPACE/crates/mooncalc-tauri/tauri.de440.conf.json")
+          fi
+          npm run tauri -- "${args[@]}" -- --locked
+      - name: Package
+        env:
+          OS: ${{ matrix.os }}
+          VARIANT: ${{ matrix.variant }}
+          LABEL: ${{ needs.version.outputs.label }}
+        run: tools/release/package.sh "$OS" "$VARIANT" "$LABEL" dist
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: mooncalc-${{ matrix.os }}-${{ matrix.variant }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    name: publish
+    if: github.ref_type == 'tag'
+    needs: [version, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: dist
+          pattern: mooncalc-*
+          merge-multiple: true
+      - name: Checksums
+        working-directory: dist
+        run: |
+          sha256sum -- * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          LABEL: ${{ needs.version.outputs.label }}
+          PRERELEASE: ${{ needs.version.outputs.prerelease }}
+        run: |
+          cat > notes.md <<EOF
+          ## Downloads
+
+          | | Windows x86_64 | Linux x86_64 |
+          | --- | --- | --- |
+          | egui app | \`mooncalc-egui-$LABEL-windows-x86_64.zip\` | \`mooncalc-egui-$LABEL-linux-x86_64.tar.gz\` |
+          | egui app, DE440 | \`mooncalc-egui-de440-$LABEL-windows-x86_64.zip\` | \`mooncalc-egui-de440-$LABEL-linux-x86_64.tar.gz\` |
+          | Tauri app | \`mooncalc-tauri-$LABEL-windows-x86_64-setup.exe\` or \`.msi\` | \`mooncalc-tauri-$LABEL-linux-x86_64.deb\` or \`.AppImage\` |
+          | Tauri app, DE440 | \`mooncalc-tauri-de440-$LABEL-windows-x86_64-setup.exe\` or \`.msi\` | \`mooncalc-tauri-de440-$LABEL-linux-x86_64.deb\` or \`.AppImage\` |
+
+          The standard builds use the built-in Meeus/ELP ephemeris and need no data files. The DE440 builds can also read JPL DE440 or DE440s files, which are not included: download \`de440s.bsp\` (about 32 MB) from [NAIF](https://naif.jpl.nasa.gov/pub/naif/generic_kernels/spk/planets/) and choose it under Ephemeris.
+
+          The Windows files are not code-signed, so SmartScreen may warn before running them. \`SHA256SUMS.txt\` lists the checksums.
+          EOF
+          flags=(--verify-tag --title "MoonCalc $LABEL" --notes-file notes.md --generate-notes)
+          if [ "$PRERELEASE" = true ]; then
+            flags+=(--prerelease)
+          else
+            flags+=(--latest)
+          fi
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" "${flags[@]}" dist/*
