@@ -7,8 +7,11 @@
 name: CI
 
 on:
+  # Not on pushes to master: only release and hotfix pull requests merge into
+  # it, and their pull request runs already tested the merge result. Releases
+  # are tagged straight after the merge (AGENTS.md, docs/ci.md).
   push:
-    branches: [master, "feature/**", "release/v*"]
+    branches: ["feature/**", "release/v*"]
   pull_request:
     branches: [master, "feature/**", "release/v*"]
   workflow_dispatch:

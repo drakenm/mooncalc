@@ -4,10 +4,12 @@ GitHub Actions runs the required checks from [AGENTS.md](../AGENTS.md) in [`.git
 
 MoonCalc is a desktop application, so nothing is deployed. In the AGENTS.md release flow, the `-rcN` pre-release takes the place of staging: its downloads are what gets tested, and the final `vX.Y.Z` tag goes on the same commit.
 
+CI doesn't run on pushes to `master`. Only release and hotfix pull requests merge into it, and their CI already ran on the pull request's merge result, so a release is tagged as soon as its pull request is merged.
+
 ## When CI runs
 
-- Pushes to `master`, `feature/**` and `release/v*`.
-- Pull requests into those branches.
+- Pushes to `feature/**` and `release/v*`.
+- Pull requests into `master`, `feature/**` and `release/v*`. GitHub tests a pull request's merge result with its base, so this is what a merge into `master` will contain.
 - Manually, from the Actions tab (`workflow_dispatch`).
 
 A newer run for the same ref cancels the one in progress.
@@ -86,8 +88,8 @@ The Windows files are not code-signed. No secrets are involved.
 ### Cutting a release
 
 1. Set `version` in `[workspace.package]` of `Cargo.toml` (and `frontend/tauri/package.json`) on the release branch.
-2. Merge the release branch into `master` and wait for `ci-required`.
-3. Tag the `master` merge commit and push the tag, e.g. `git tag -a v0.1.1-rc1 -m "MoonCalc 0.1.1-rc1"` then `git push origin v0.1.1-rc1`.
+2. Merge the release pull request into `master` once `ci-required` passes on it. Check that the merged tree matches the release branch head: `git diff <release head> origin/master` prints nothing.
+3. Tag the `master` merge commit straight away and push the tag, e.g. `git tag -a v0.1.1-rc1 -m "MoonCalc 0.1.1-rc1"` then `git push origin v0.1.1-rc1`.
 
 A tag that doesn't match the workspace version fails the `version` job before anything is built.
 

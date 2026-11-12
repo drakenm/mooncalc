@@ -46,5 +46,5 @@ GitHub issues can't be filed from this environment yet: the `gh` CLI is authenti
 | gui | The Sky and Trajectory jobs can't be cancelled inside `NightScene::compute`/`DayScene::compute`, so fast date scrubbing runs one short thread per date (1–8 ms each, measured). The Moon disc raster stays on the UI thread: 18 ms at 512 px in release (41 ms debug), only when the view changes. | gui robustness |
 | tauri | `MockBackend`'s sky API is a low-precision model (about 0.3° for the Moon, optical libration only, 25 stars, 10 craters) for `npm run dev`; screenshots of real behaviour need the desktop app. | tauri sky + moon |
 | ci | Require the `ci-required` check in branch protection for `master` and `release/v*` (repository settings; `gh` here has no access to the repository). | ci |
-| release | Windows builds aren't code-signed (SmartScreen warns), and Linux has no `.rpm` or Flatpak. AGENTS.md's release flow still describes staging and production deployment; for this desktop app the `-rcN` pre-release stands in for staging (`docs/ci.md`). | release builds |
+| release | Windows builds aren't code-signed (SmartScreen warns), and Linux has no `.rpm` or Flatpak. | release builds |
 | ci | The nightly DE440 workflow runs only once `.github/workflows/de440.yml` is on the GitHub default branch (`master` or `main`). Until then, start it manually. | ci |
