@@ -14,7 +14,7 @@ Adding or changing these instructions does not itself authorize executing a rele
 
 ## Branch roles and direction
 
-- `master`: released, validated history. MoonCalc is a desktop app, so nothing is deployed; each release is published as GitHub release downloads. Only release branches merge into it, plus the occasional hotfix (see [Hotfixes](#hotfixes)). Tag releases here.
+- `master`: released, validated history. MoonCalc is a desktop app, so nothing is deployed; each release is published as GitHub release downloads. Only `release/vX.Y.Z` branches (matching the `Cargo.toml` version), `hotfix/<issue>-<name>` branches (see [Hotfixes](#hotfixes)) and `chore/` branches merge into it; CI enforces this, and they must pass `ci-required` unless they change only documentation. Tag releases here.
 - `release/vX.Y.Z`: the integration branch for one release. It starts from `master` and combines the selected feature and bugfix work for checks and integration fixes. CI runs on pushes and pull requests to `release/v*`.
 - `feature/<name>`: the parent for an ongoing feature, collecting coherent improvements. A simple feature can use one implementation branch without an extra parent layer.
 - Child or section branches: focused implementation work descending from the assigned parent or the previous completed section.

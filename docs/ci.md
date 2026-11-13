@@ -4,13 +4,28 @@ GitHub Actions runs the required checks from [AGENTS.md](../AGENTS.md) in [`.git
 
 MoonCalc is a desktop application, so nothing is deployed. In the AGENTS.md release flow, the `-rcN` pre-release takes the place of staging: its downloads are what gets tested, and the final `vX.Y.Z` tag goes on the same commit.
 
-CI doesn't run on pushes to `master`. Only release and hotfix pull requests merge into it, and their CI already ran on the pull request's merge result, so a release is tagged as soon as its pull request is merged.
+CI doesn't run on pushes to `master`. Only release, hotfix and `chore/` pull requests merge into it, and their CI already ran on the pull request's merge result, so a release is tagged as soon as its pull request is merged.
 
 ## When CI runs
 
 - Pushes to `feature/**` and `release/v*`.
-- Pull requests into `master`, `feature/**` and `release/v*`. GitHub tests a pull request's merge result with its base, so this is what a merge into `master` will contain.
+- Pull requests into `master`, `feature/**` and `release/v*` (see the rules below). GitHub tests a pull request's merge result with its base, so this is what a merge into `master` will contain.
 - Manually, from the Actions tab (`workflow_dispatch`).
+
+A `changes` job gates the checks. For pull requests it first applies the branch policy:
+
+| Pull request | Result |
+| --- | --- |
+| `release/vX.Y.Z` into `master` | Allowed when `X.Y.Z` equals the workspace version in `Cargo.toml` at the PR head. CI runs. |
+| `hotfix/<issue>-<name>` into `master` | Allowed when `<issue>` is an existing GitHub issue (not a pull request) in this repository. CI runs. |
+| `chore/*` into `master` | Allowed. CI runs. |
+| Any other branch into `master`, or a branch from a fork | `changes` fails, so `ci-required` fails and the PR can't merge. |
+| `release/v*` into any other branch | CI runs. |
+| Anything else into any other branch | CI is skipped. `ci-required` reports skipped, which branch protection accepts as passing. |
+
+It then diffs the push (`before..after`) or the pull request (`base...head`). When every changed file is Markdown (`*.md`) or under `docs/`, the checks are skipped and `ci-required` passes. `LICENSE` counts as code because the GUI embeds it. Manual runs, new branches and force pushes whose old head is gone run every check.
+
+The policy only blocks merges when branch protection on `master` requires `ci-required`. The `changes` job reads issues with the workflow's own `GITHUB_TOKEN` (`issues: read`).
 
 A newer run for the same ref cancels the one in progress.
 
@@ -23,7 +38,8 @@ A newer run for the same ref cancels the one in progress.
 | `test (ubuntu-latest)`, `test (windows-latest)` | both | `cargo test --workspace` |
 | `wasm` | ubuntu-latest | `cargo build --target wasm32-unknown-unknown -p mooncalc-core -p mooncalc-visibility -p mooncalc-maps -p mooncalc-hijri -p mooncalc-atlas -p mooncalc-app` (the [portability rule](architecture.md)) |
 | `frontend` | ubuntu-latest, Node 24 | `npm ci`, `npm run build`, `npm run check` in `frontend/tauri/` |
-| `ci-required` | ubuntu-latest | Needs every job above. Fails unless all of them succeeded, including when one failed, was cancelled or was skipped. |
+| `changes` | ubuntu-latest | Applies the pull request branch policy and decides whether the change touches code (see [When CI runs](#when-ci-runs)). |
+| `ci-required` | ubuntu-latest | Needs every job above. Fails unless all of them succeeded, including when one failed, was cancelled or was skipped. The exception is a documentation-only change, where the checks are skipped on purpose and it passes. |
 
 Branch protection should require only the `ci-required` check. It always reports a result, so the rule doesn't change when jobs are added. Add new jobs to its `needs` list.
 
