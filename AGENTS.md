@@ -171,7 +171,7 @@ No version tag is needed for an ordinary implementation commit or parent promoti
 
 ### Hotfixes
 
-Every hotfix references a GitHub issue. A production defect that cannot wait for the next release branch first gets an issue (and its `GHI-` entry in [follow-up tasks](docs/planning/follow-up-tasks.md)), then a `hotfix/<issue>-<name>` branch from `master`, for example `hotfix/301-login-redirect`. Open its pull request into `master` with `Closes #<issue>`; this is the exception to the release-branch-only rule. Tag the merge commit `vX.Y.Z-hf<issue>` as soon as it lands, where `X.Y.Z` is the next patch version, for example `v1.5.1-hf301`; the tag publishes the release like any other. Then merge `master` into the current release branch so the fix is not lost.
+Every hotfix references a GitHub issue. A production defect that cannot wait for the next release branch first gets an issue (and its `GHI-` entry in the [local GHI tracker](docs/local-ghi-tracker.md)), then a `hotfix/<issue>-<name>` branch from `master`, for example `hotfix/301-login-redirect`. Open its pull request into `master` with `Closes #<issue>`; this is the exception to the release-branch-only rule. Tag the merge commit `vX.Y.Z-hf<issue>` as soon as it lands, where `X.Y.Z` is the next patch version, for example `v1.5.1-hf301`; the tag publishes the release like any other. Then merge `master` into the current release branch so the fix is not lost.
 
 ## Refresh and continue after release
 
@@ -192,9 +192,9 @@ Use explicit fetch and merge steps when remote synchronization is needed rather 
 
 ## Record follow-up tasks
 
-[Follow-up tasks](docs/planning/follow-up-tasks.md) is an offline mirror of the GitHub issues, covering bugs, features, and follow-up work. Read it instead of querying GitHub when you need the backlog.
+The [local GHI tracker](docs/local-ghi-tracker.md) is an offline mirror of the GitHub issues, covering bugs, features, and follow-up work. Read it instead of querying GitHub when you need the backlog.
 
-When work turns up something worth doing later (a deferred item, a bug noticed in passing, a failed or unmeasured check, an operational step, or a design limit), file a GitHub issue with `gh issue create`, labelled `bug` or `enhancement` as appropriate. Then add a `GHI-<issue number>` entry to the file in the same branch as the work that found it. When work resolves an issue, reference it in the pull request (for example, `Closes #285`) and move its entry to **Closed** in the same branch. Never invent IDs; the issue number is the ID. Present new and updated entries to the user as they occur.
+When work turns up something worth doing later (a deferred item, a bug noticed in passing, a failed or unmeasured check, an operational step, or a design limit), file a GitHub issue with `gh issue create`, labelled `bug` or `enhancement` as appropriate. Then add a `GHI-<issue number>` entry to the file in the same branch as the work that found it. When work resolves an issue, reference it in the pull request (for example, `Closes #285`) and move its entry to **Closed** in the same branch. Never invent IDs; the issue number is the ID. Items under **Untracked** were noted before they had an issue: when you file one, move it to **Open** under its `GHI-` ID. Present new and updated entries to the user as they occur.
 
 ## Required handoff report
 
@@ -210,4 +210,4 @@ At task completion or a pause, report:
 - Tests, benchmarks, whitespace and LF verification performed, with outcomes and any unavailable required checks.
 - Release branch, `master`, tag, and publishing actions only if performed, including the exact release commit and version when applicable.
 - Remaining work or known risks needed for the next agent to continue safely.
-- Issues filed or updated, and the matching entries in `docs/planning/follow-up-tasks.md`, by `GHI-` ID.
+- Issues filed or updated, and the matching entries in `docs/local-ghi-tracker.md`, by `GHI-` ID.

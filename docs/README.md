@@ -11,6 +11,6 @@
 | [Tauri frontend](../frontend/tauri/README.md) | Running and building the Tauri + TypeScript app, and the backend transport layer. |
 | [Continuous integration](ci.md) | GitHub Actions jobs (`ci-required`), Linux build packages, the DE440 kernel workflow, action pins, and reproducing CI locally. |
 | [Validation](validation.md) | Reference datasets in `tests/fixtures/` (sources, licences, units, time scales), how `tools/fixtures/` regenerates them, and suggested test tolerances. |
-| [Follow-ups](planning/follow-ups.md) | Deferred work and known limits, until GitHub issues can be filed. |
+| [Local GHI tracker](local-ghi-tracker.md) | Offline mirror of the GitHub issues (`GHI-<n>`), plus deferred work and known limits not yet filed. |
 
 Agent workflow rules are in [AGENTS.md](../AGENTS.md).
