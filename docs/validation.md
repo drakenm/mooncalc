@@ -2,7 +2,7 @@
 
 Reference cases live in `tests/fixtures/`, one directory per topic. Each directory has a `README.md` giving the source, units, time scale and frame of its files. This page is the full reference: where every dataset comes from, its terms of use, how it was produced, and the tolerance a test should use against it.
 
-Everything here was retrieved on **2026-11-11**. Fixtures are plain CSV (UTF-8, LF, one header row, no comment lines) or JSON. Empty CSV fields mean "not given by the source".
+Everything here was retrieved on **2026-11-11**, except `ephemeris/horizons_geocentric_random.csv` (2026-11-13). Fixtures are plain CSV (UTF-8, LF, one header row, no comment lines) or JSON. Empty CSV fields mean "not given by the source".
 
 ## Regenerating
 
@@ -10,7 +10,7 @@ The scripts in `tools/fixtures/` use only the Python standard library. Run them 
 
 | Script | Produces |
 | --- | --- |
-| `fetch_fixtures.py <target>... \| all` | Every API- or web-fetched fixture: `horizons-geo`, `horizons-topo`, `usno-rstt`, `usno-phases`, `deltat`, `eclipses`, `hijri`. Requests are sequential, 1.5 s apart, with User-Agent `mooncalc-validation-fixtures` and no other identifying data. |
+| `fetch_fixtures.py <target>... \| all` | Every API- or web-fetched fixture: `horizons-geo`, `horizons-geo-random`, `horizons-topo`, `usno-rstt`, `usno-phases`, `deltat`, `eclipses`, `hijri`. Requests are sequential, 1.5 s apart, with User-Agent `mooncalc-validation-fixtures` and no other identifying data. |
 | `extract_yallop_table4.py` | `crescent/yallop1997_table4.csv` from `pdftotext -raw` output of the Yallop PDF, with built-in consistency checks. |
 | `check_odeh2004_table6.py` | Consistency checks for the hand-transcribed Odeh table. |
 | `pdf_ccitt_to_tiff.py` | Full-resolution page images of the Odeh scan, for re-checking the transcription. |
@@ -62,6 +62,12 @@ Constants transcribed from the two papers: Yallop's q polynomial, the A–F thre
   - **Meeus/ELP backend, outside 1900–2100:** double those limits.
   - **DE440 backend:** RA, Dec and λ ≤ 0.2″ for 1962–2026, where EOP nutation corrections apply, and ≤ 0.5″ otherwise. Moon distance ≤ 0.1 km. Sun distance ≤ 10 km.
   - **Elongation:** compare `elong_sot_deg` with the computed ARCL at the same tolerance as the positions.
+
+### `horizons_geocentric_random.csv`: JPL Horizons geocentric Sun and Moon at random epochs, 240 rows
+
+- **Source, terms, columns and corrections:** as `horizons_geocentric.csv`, retrieved 2026-11-13; EOP file `eop.261112.p270208`. The TLIST is sent in batches of 30 epochs.
+- **Epochs:** 120 TT epochs for each body, drawn uniformly over 1900-01-01.0 to 2100-01-01.0 TT (JD 2415020.5 to 2488069.5) with Python's `random.Random(20261113)` and rounded to 10⁻⁶ day. None coincides with an epoch of `horizons_geocentric.csv`. Hand-picked epochs can miss the worst of a truncated series' error; random ones sample it without that choice.
+- **Tolerances:** those of `horizons_geocentric.csv` for 1900–2100.
 
 ### `horizons_topocentric.csv`: JPL Horizons topocentric alt/az, 60 rows
 
@@ -150,6 +156,28 @@ Observed residuals of `mooncalc-core`'s Meeus backend, from the integration test
 | Moon geometric distance | 4.4 / 2.5 km | 6.5 / 3.6 km |
 | Moon vs raw `delta_km` | 41 / 28 km | 42 / 31 km |
 | Elongation (ARCL) | 5.9″ / 2.8″ | 9.2″ / 3.5″ |
+
+### Geocentric, random epochs (`horizons_geocentric`, `meeus_vs_horizons_geocentric_random`)
+
+120 epochs per body, all within 1900–2100.
+
+| Quantity | Full VSOP87D | Truncated |
+| --- | --- | --- |
+| Sun λ | 0.11″ / 0.07″ | 0.22″ / 0.09″ |
+| Sun β | 0.02″ / 0.01″ | 0.08″ / 0.03″ |
+| Sun RA / Dec | 0.11″ / 0.07″, 0.06″ / 0.03″ | 0.22″ / 0.08″, 0.12″ / 0.04″ |
+| Sun distance | 8.6 / 4.7 km | 62 / 23 km |
+
+| Quantity | Moon (either Sun series) |
+| --- | --- |
+| λ | 11.0″ / 2.7″ |
+| β | 2.8″ / 1.0″ |
+| RA / Dec | 11.0″ / 2.6″, 4.9″ / 1.3″ |
+| Geometric distance | 7.7 / 2.7 km |
+| vs raw `delta_km` | 44 / 27 km |
+| Elongation (ARCL) | 9.0″ / 2.6″ |
+
+The Moon's largest residuals (λ and RA 11.0″, at 1960-12-18 19:43 TT) are almost twice the hand-picked set's 6.1″. They stay inside the 15″ longitude and 18″ RA limits, and below the 12.7″ Meeus − DE440 maximum over 10 000 epochs, so they are the truncated ELP series, not a defect. The test's observed-level guards for this set are 14″ (RA, Dec, λ, elongation), 5″ (β) and 11 km.
 
 ### Topocentric (`horizons_topocentric`, 30 rows per body)
 
