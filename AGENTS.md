@@ -12,6 +12,8 @@ Develop work in dedicated branches and worktrees. Merge ready work through pull 
 
 Adding or changing these instructions does not itself authorize executing a release, tagging master, publishing branches, opening or merging pull requests, or reorganizing existing worktrees. Perform those actions when they are part of the requested work. Within an assigned development task, complete local implementation, verification, commits, and ready parent promotion without repeatedly asking for approval when the parent and scope are already established.
 
+On this machine `gh` has many accounts. Run every `gh` command for this repository as `drakenm`, without switching the active account: `GH_TOKEN=$(gh auth token --user drakenm) gh …`. If `gh auth token --user drakenm` fails (no such login), use the active account and report any permission errors rather than switching accounts.
+
 ## Branch roles and direction
 
 - `master`: released, validated history. MoonCalc is a desktop app, so nothing is deployed; each release is published as GitHub release downloads. Only release branches merge into it, plus the occasional hotfix (see [Hotfixes](#hotfixes)). Tag releases here.
