@@ -7,8 +7,8 @@
 name: CI
 
 on:
-  # Not on pushes to master: only release and hotfix pull requests merge into
-  # it, and their pull request runs already tested the merge result. Releases
+  # Not on pushes to master: only release, hotfix and chore pull requests
+  # merge into it, and their pull request runs already tested the merge result. Releases
   # are tagged straight after the merge (AGENTS.md, docs/ci.md).
   push:
     branches: ["feature/**", "release/v*"]
@@ -43,8 +43,129 @@ env:
     libfontconfig-dev
 
 jobs:
+  # Gate for every job below.
+  # - Pull requests into master: only from release/vX.Y.Z (matching the
+  #   workspace version in Cargo.toml), hotfix/<issue>-<name> (an existing
+  #   GitHub issue) or chore/* branches of this repository. Anything else fails
+  #   here, and so fails ci-required.
+  # - Other pull requests run CI only from release/v* branches; the rest skip
+  #   it (ci-required reports skipped, which branch protection accepts).
+  # - The checks skip, and ci-required passes, when the change touches only
+  #   documentation (Markdown files and docs/).
+  changes:
+    name: changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: read
+    outputs:
+      run: ${{ steps.policy.outputs.run }}
+      code: ${{ steps.diff.outputs.code }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Branch policy
+        id: policy
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          HEAD_REF: ${{ github.head_ref }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          REPO: ${{ github.repository }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "$EVENT" != pull_request ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "$BASE_REF" != master ]; then
+            case "$HEAD_REF" in
+              release/v*) run=true ;;
+              *) run=false; echo "Not a release branch; skipping CI." ;;
+            esac
+            echo "run=$run" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "$HEAD_REPO" != "$REPO" ]; then
+            echo "::error::Pull requests into master must come from a branch of $REPO, not $HEAD_REPO."
+            exit 1
+          fi
+          case "$HEAD_REF" in
+            release/*)
+              if ! [[ "$HEAD_REF" =~ ^release/v([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+                echo "::error::Release branch $HEAD_REF must be named release/vX.Y.Z."
+                exit 1
+              fi
+              branch_version=${BASH_REMATCH[1]}
+              version=$(git show "$PR_HEAD:Cargo.toml" | python3 -c 'import sys, tomllib; print(tomllib.loads(sys.stdin.read())["workspace"]["package"]["version"])')
+              if [ "$version" != "$branch_version" ]; then
+                echo "::error::$HEAD_REF does not match the workspace version $version in Cargo.toml."
+                exit 1
+              fi
+              echo "Release $branch_version."
+              ;;
+            hotfix/*)
+              if ! [[ "$HEAD_REF" =~ ^hotfix/([0-9]+)-[a-z0-9][a-z0-9-]*$ ]]; then
+                echo "::error::Hotfix branch $HEAD_REF must be named hotfix/<issue>-<name>, for example hotfix/301-login-redirect."
+                exit 1
+              fi
+              issue=${BASH_REMATCH[1]}
+              if ! is_issue=$(gh api "repos/$REPO/issues/$issue" --jq '.pull_request == null' 2>/dev/null) || [ "$is_issue" != true ]; then
+                echo "::error::$HEAD_REF references #$issue, which is not an issue in $REPO."
+                exit 1
+              fi
+              echo "Hotfix for issue #$issue."
+              ;;
+            chore/*)
+              echo "Chore branch."
+              ;;
+            *)
+              echo "::error::Only release/vX.Y.Z, hotfix/<issue>-<name> and chore/* branches may merge into master, not $HEAD_REF."
+              exit 1
+              ;;
+          esac
+          echo "run=true" >> "$GITHUB_OUTPUT"
+      - name: Detect code changes
+        id: diff
+        if: steps.policy.outputs.run == 'true'
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          PUSH_AFTER: ${{ github.sha }}
+        run: |
+          case "$EVENT" in
+            pull_request) range="$PR_BASE...$PR_HEAD" ;;
+            push) range="$PUSH_BEFORE..$PUSH_AFTER" ;;
+            *) range="" ;;
+          esac
+          # Manual runs, new branches (all-zero before) and force pushes whose
+          # old head is gone: run everything.
+          if [ -z "$range" ] || ! files=$(git diff --name-only "$range" 2>/dev/null); then
+            echo "No usable diff range; running all checks."
+            echo "code=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "$files"
+          # Non-code: Markdown anywhere and everything under docs/.
+          # (LICENSE is not listed: the GUI embeds it with include_str!.)
+          code_files=$(echo "$files" | grep -vE '(\.md$|^docs/)' | grep -v '^$' || true)
+          if [ -n "$code_files" ]; then
+            echo "code=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Documentation-only change; skipping checks."
+            echo "code=false" >> "$GITHUB_OUTPUT"
+          fi
+
   fmt:
     name: fmt
+    needs: changes
+    if: needs.changes.outputs.run == 'true' && needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -57,6 +178,8 @@ jobs:
 
   clippy:
     name: clippy
+    needs: changes
+    if: needs.changes.outputs.run == 'true' && needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
@@ -80,6 +203,8 @@ jobs:
 
   test:
     name: test (${{ matrix.os }})
+    needs: changes
+    if: needs.changes.outputs.run == 'true' && needs.changes.outputs.code == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -107,6 +232,8 @@ jobs:
 
   wasm:
     name: wasm
+    needs: changes
+    if: needs.changes.outputs.run == 'true' && needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -123,6 +250,8 @@ jobs:
 
   frontend:
     name: frontend
+    needs: changes
+    if: needs.changes.outputs.run == 'true' && needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     defaults:
@@ -142,21 +271,29 @@ jobs:
       - run: npm run check
 
   # Single check for branch protection: passes only when every job above
-  # succeeded. Runs even when a dependency failed or was cancelled, so the
-  # check reports a failure rather than staying skipped.
+  # succeeded, or when the checks were skipped for a documentation-only
+  # change. Runs even when a dependency failed or was cancelled (including a
+  # branch-policy failure in changes), so the check reports a failure rather
+  # than staying skipped. Skipped (and so passing) only for pull requests the
+  # gate exempts from CI: non-release pull requests into branches other than
+  # master.
   ci-required:
     name: ci-required
-    if: always()
-    needs: [fmt, clippy, test, wasm, frontend]
+    if: always() && needs.changes.outputs.run != 'false'
+    needs: [changes, fmt, clippy, test, wasm, frontend]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - name: Check job results
         env:
           RESULTS: ${{ toJSON(needs) }}
+          CODE: ${{ needs.changes.outputs.code }}
         run: |
           echo "$RESULTS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
-          failed=$(echo "$RESULTS" | jq -r '[to_entries[] | select(.value.result != "success") | .key] | join(", ")')
+          # Documentation-only change: the checks were skipped on purpose.
+          allowed='["success"]'
+          if [ "$CODE" = "false" ]; then allowed='["success","skipped"]'; fi
+          failed=$(echo "$RESULTS" | jq -r --argjson ok "$allowed" '[to_entries[] | select(.value.result as $r | $ok | any(. == $r) | not) | .key] | join(", ")')
           if [ -n "$failed" ]; then
             echo "::error::Required jobs did not succeed: $failed"
             exit 1
