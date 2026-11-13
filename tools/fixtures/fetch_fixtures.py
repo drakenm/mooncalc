@@ -5,6 +5,7 @@ Standard library only. Run from the repository root:
 
     python -I tools/fixtures/fetch_fixtures.py all
     python -I tools/fixtures/fetch_fixtures.py horizons-geo horizons-topo
+    python -I tools/fixtures/fetch_fixtures.py horizons-geo-random
     python -I tools/fixtures/fetch_fixtures.py --list
 
 Each target overwrites its output CSV(s). Requests are sequential with a
@@ -13,6 +14,8 @@ docs/validation.md for what each fixture contains and its terms of use.
 
 Targets:
     horizons-geo    JPL Horizons geocentric apparent Sun and Moon (TT epochs)
+    horizons-geo-random
+                    The same quantities at 120 seeded random TT epochs, 1900-2100
     horizons-topo   JPL Horizons topocentric alt/az, airless and refracted (UT epochs)
     usno-rstt       USNO rise/set/transit/twilight, one UT day per row group
     usno-phases     USNO primary Moon phases 2000-2030 plus a few historical years
@@ -24,6 +27,7 @@ import csv
 import html
 import json
 import os
+import random
 import re
 import sys
 import time
@@ -104,6 +108,21 @@ def geo_epochs_tt():
     return sorted(set(out))
 
 
+# Seed and count for horizons-geo-random. Changing either changes the epochs.
+RANDOM_GEO_SEED = 20261113
+RANDOM_GEO_COUNT = 120
+# Epochs per Horizons request: longer TLISTs make the request URL too long.
+TLIST_BATCH = 30
+
+
+def geo_epochs_tt_random():
+    """RANDOM_GEO_COUNT TT epochs drawn uniformly over 1900-01-01.0 to
+    2100-01-01.0 (JD 2415020.5 to 2488069.5) from a fixed seed, rounded to
+    1e-6 day. They complement the hand-picked epochs of geo_epochs_tt()."""
+    rng = random.Random(RANDOM_GEO_SEED)
+    return sorted(round(rng.uniform(2415020.5, 2488069.5), 6) for _ in range(RANDOM_GEO_COUNT))
+
+
 def horizons_query(params):
     base = {
         "format": "text",
@@ -150,16 +169,26 @@ def tlist(jds):
 
 
 def fetch_horizons_geo():
-    epochs = geo_epochs_tt()
+    write_horizons_geo(geo_epochs_tt(), "ephemeris/horizons_geocentric.csv")
+
+
+def fetch_horizons_geo_random():
+    write_horizons_geo(geo_epochs_tt_random(), "ephemeris/horizons_geocentric_random.csv")
+
+
+def write_horizons_geo(epochs, relpath):
     out = []
     for target, name in (("10", "sun"), ("301", "moon")):
-        rows, meta = horizons_query({
-            "COMMAND": f"'{target}'",
-            "CENTER": "'500@399'",
-            "TIME_TYPE": "TT",
-            "TLIST": tlist(epochs),
-            "QUANTITIES": "'2,10,13,20,23,30,31'",
-        })
+        rows = []
+        for i in range(0, len(epochs), TLIST_BATCH):
+            batch, meta = horizons_query({
+                "COMMAND": f"'{target}'",
+                "CENTER": "'500@399'",
+                "TIME_TYPE": "TT",
+                "TLIST": tlist(epochs[i:i + TLIST_BATCH]),
+                "QUANTITIES": "'2,10,13,20,23,30,31'",
+            })
+            rows += batch
         print(f"  {name}: {meta}")
         for r in rows:
             delta_au = float(pick(r, "delta"))
@@ -178,7 +207,7 @@ def fetch_horizons_geo():
                 pick(r, "Illu%"),
                 pick(r, "S-O-T"),
             ])
-    write_csv("ephemeris/horizons_geocentric.csv", [
+    write_csv(relpath, [
         "body", "jd_tt", "calendar_tt", "tdb_minus_ut_s", "ra_app_deg", "dec_app_deg",
         "ecl_lon_app_deg", "ecl_lat_app_deg", "delta_au", "delta_km", "ang_diam_arcsec",
         "illum_pct", "elong_sot_deg",
@@ -439,6 +468,7 @@ def fetch_hijri():
 
 TARGETS = {
     "horizons-geo": fetch_horizons_geo,
+    "horizons-geo-random": fetch_horizons_geo_random,
     "horizons-topo": fetch_horizons_topo,
     "usno-rstt": fetch_usno_rstt,
     "usno-phases": fetch_usno_phases,

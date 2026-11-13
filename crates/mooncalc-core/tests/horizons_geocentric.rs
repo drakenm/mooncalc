@@ -1,7 +1,9 @@
 //! The Meeus backend (VSOP87D Sun, Meeus-truncated ELP-2000/82 Moon) against
 //! JPL Horizons (DE441) geocentric apparent positions:
-//! `tests/fixtures/ephemeris/horizons_geocentric.csv`, 44 TT epochs per body,
-//! 1600–2200. Tolerances are those suggested in `docs/validation.md`
+//! `tests/fixtures/ephemeris/horizons_geocentric.csv`, 44 hand-picked TT
+//! epochs per body, 1600–2200, and
+//! `tests/fixtures/ephemeris/horizons_geocentric_random.csv`, 120 seeded
+//! random TT epochs per body, 1900–2100. Tolerances are those suggested in `docs/validation.md`
 //! ("Ephemeris"): for 1900–2100, Sun λ, α, δ ≤ 10″; Moon λ, α, δ ≤ 18″,
 //! β ≤ 0.003° and distance ≤ 15 km; doubled outside 1900–2100.
 //!
@@ -74,9 +76,13 @@ struct Row {
     elong: f64,
 }
 
-fn rows() -> Vec<Row> {
-    let csv = Csv::fixture("ephemeris/horizons_geocentric.csv");
-    assert_eq!(csv.len(), 88);
+const FIXED: &str = "ephemeris/horizons_geocentric.csv";
+const RANDOM: &str = "ephemeris/horizons_geocentric_random.csv";
+
+/// The rows of one geocentric fixture, checking its row count.
+fn rows(rel: &str, n: usize) -> Vec<Row> {
+    let csv = Csv::fixture(rel);
+    assert_eq!(csv.len(), n, "{rel}");
     csv.records()
         .map(|r| Row {
             body: r.str("body").to_owned(),
@@ -92,11 +98,11 @@ fn rows() -> Vec<Row> {
         .collect()
 }
 
-fn compare(series: SunSeries) -> (Split, Split) {
+fn compare(series: SunSeries, rows: &[Row]) -> (Split, Split) {
     let eph = MeeusEphemeris::with_sun_series(series);
     let mut sun = Split::default();
     let mut moon = Split::default();
-    for row in rows() {
+    for row in rows {
         let nut = NutationObliquity::at(row.jd_tt);
         let is_sun = match row.body.as_str() {
             "sun" => true,
@@ -183,10 +189,91 @@ fn check(name: &str, b: &BodyStats, ang: f64, lat: f64, dist_km: f64) {
     );
 }
 
+/// The suggested tolerances of `docs/validation.md`, plus the tighter Moon
+/// longitude and the raw light-time range limit (see the module docs).
+fn check_suggested(series: SunSeries, sun: &Split, moon: &Split) -> f64 {
+    // The Sun angular limit is the full-VSOP87D one for both series: the
+    // truncated series agrees with the full one to 0.12″. The fixture docs
+    // give no Meeus Sun distance limit: the full series is held to 15 km
+    // (the Sun's barycentric light-time term, see the module docs), the
+    // truncated one to 150 km (10⁻⁶ AU, its documented truncation bound;
+    // 150 km is 0.001″ of solar semi-diameter).
+    let sun_km = match series {
+        SunSeries::Truncated => 150.0,
+        SunSeries::Full => 15.0,
+    };
+    let parts = [
+        ("Sun 1900–2100", &sun.modern, 10.0, 10.0, sun_km),
+        ("Sun outside", &sun.outside, 20.0, 20.0, 2.0 * sun_km),
+        ("Moon 1900–2100", &moon.modern, 18.0, 10.8, 15.0),
+        ("Moon outside", &moon.outside, 36.0, 21.6, 30.0),
+    ];
+    for (name, b, ang, lat, km) in parts {
+        if b.ra.n > 0 {
+            check(&format!("{series:?} {name}"), b, ang, lat, km);
+        }
+    }
+    for (name, b, lon, raw) in [
+        ("Moon 1900–2100", &moon.modern, 15.0, 60.0),
+        ("Moon outside", &moon.outside, 30.0, 60.0),
+    ] {
+        assert!(
+            b.lon.max <= lon,
+            "{series:?} {name} λ {:.3}\" > {lon}\" at {}",
+            b.lon.max,
+            b.lon.max_at
+        );
+        assert!(
+            b.dist_raw.max <= raw,
+            "{series:?} {name} raw Δ {:.3} km > {raw} km at {}",
+            b.dist_raw.max,
+            b.dist_raw.max_at
+        );
+    }
+    sun_km
+}
+
+/// The 120 seeded random epochs over 1900–2100. They sample the Meeus
+/// truncation error more widely than the hand-picked epochs: the Moon's
+/// RA and λ reach 11.0″ (1960-12-18), above the hand-picked set's 6.1″
+/// and in line with the 12.7″ Meeus − DE440 maximum over 10 000 epochs.
+#[test]
+fn meeus_vs_horizons_geocentric_random() {
+    let rows = rows(RANDOM, 240);
+    for series in [SunSeries::Truncated, SunSeries::Full] {
+        let (sun, moon) = compare(series, &rows);
+        println!("--- {series:?} VSOP87D, random epochs ---");
+        print("Sun 1900–2100", &sun.modern, false);
+        print("Moon 1900–2100", &moon.modern, true);
+        assert_eq!(sun.modern.ra.n, 120);
+        assert_eq!(moon.modern.ra.n, 120);
+        assert_eq!(sun.outside.ra.n + moon.outside.ra.n, 0);
+        let sun_km = check_suggested(series, &sun, &moon);
+
+        // Regression guards near the observed level, as for the fixed set.
+        check(
+            &format!("{series:?} Sun random (observed)"),
+            &sun.modern,
+            0.5,
+            0.2,
+            sun_km,
+        );
+        check(
+            &format!("{series:?} Moon random (observed)"),
+            &moon.modern,
+            14.0,
+            5.0,
+            11.0,
+        );
+        assert!(sun.modern.ra.rms() < 0.15 && moon.modern.ra.rms() < 4.0);
+    }
+}
+
 #[test]
 fn meeus_vs_horizons_geocentric() {
+    let rows = rows(FIXED, 88);
     for series in [SunSeries::Truncated, SunSeries::Full] {
-        let (sun, moon) = compare(series);
+        let (sun, moon) = compare(series, &rows);
         println!("--- {series:?} VSOP87D ---");
         print("Sun 1900–2100", &sun.modern, false);
         print("Sun outside", &sun.outside, false);
@@ -195,64 +282,7 @@ fn meeus_vs_horizons_geocentric() {
         assert_eq!(sun.modern.ra.n + sun.outside.ra.n, 44);
         assert_eq!(moon.modern.ra.n + moon.outside.ra.n, 44);
 
-        // Suggested tolerances (docs/validation.md). The Sun angular limit
-        // is the full-VSOP87D one for both series: the truncated series
-        // agrees with the full one to 0.12″. The fixture docs give no Meeus
-        // Sun distance limit: the full series is held to 15 km (the Sun's
-        // barycentric light-time term, see the module docs), the truncated
-        // one to 150 km (10⁻⁶ AU, its documented truncation bound; 150 km
-        // is 0.001″ of solar semi-diameter).
-        let sun_km = match series {
-            SunSeries::Truncated => 150.0,
-            SunSeries::Full => 15.0,
-        };
-        check(
-            &format!("{series:?} Sun 1900–2100"),
-            &sun.modern,
-            10.0,
-            10.0,
-            sun_km,
-        );
-        check(
-            &format!("{series:?} Sun outside"),
-            &sun.outside,
-            20.0,
-            20.0,
-            2.0 * sun_km,
-        );
-        check(
-            &format!("{series:?} Moon 1900–2100"),
-            &moon.modern,
-            18.0,
-            10.8,
-            15.0,
-        );
-        check(
-            &format!("{series:?} Moon outside"),
-            &moon.outside,
-            36.0,
-            21.6,
-            30.0,
-        );
-
-        // Moon longitude and raw light-time range (see the module docs).
-        for (name, b, lon, raw) in [
-            ("Moon 1900–2100", &moon.modern, 15.0, 60.0),
-            ("Moon outside", &moon.outside, 30.0, 60.0),
-        ] {
-            assert!(
-                b.lon.max <= lon,
-                "{series:?} {name} λ {:.3}\" > {lon}\" at {}",
-                b.lon.max,
-                b.lon.max_at
-            );
-            assert!(
-                b.dist_raw.max <= raw,
-                "{series:?} {name} raw Δ {:.3} km > {raw} km at {}",
-                b.dist_raw.max,
-                b.dist_raw.max_at
-            );
-        }
+        let sun_km = check_suggested(series, &sun, &moon);
 
         // Regression guards near the observed level (about 1.5–3 times the
         // observed maxima), so that a defect much smaller than the
@@ -294,7 +324,7 @@ fn meeus_vs_horizons_geocentric() {
 /// both the core and Meeus' printed Δ = 368 409.7 km.
 #[test]
 fn meeus_47a_epoch_distance() {
-    let row = rows()
+    let row = rows(FIXED, 88)
         .into_iter()
         .find(|r| r.body == "moon" && r.jd_tt == 2_448_724.5)
         .expect("47.a epoch in fixture");
