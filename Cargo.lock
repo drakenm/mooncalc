@@ -3128,7 +3128,7 @@ dependencies = [
 
 [[package]]
 name = "mooncalc-app"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "mooncalc-atlas",
  "mooncalc-core",
@@ -3142,7 +3142,7 @@ dependencies = [
 
 [[package]]
 name = "mooncalc-atlas"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "jiff",
  "jiff-tzdb",
@@ -3153,11 +3153,11 @@ dependencies = [
 
 [[package]]
 name = "mooncalc-core"
-version = "0.1.1"
+version = "0.1.2"
 
 [[package]]
 name = "mooncalc-gui"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "eframe",
  "egui",
@@ -3176,14 +3176,14 @@ dependencies = [
 
 [[package]]
 name = "mooncalc-hijri"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "mooncalc-core",
 ]
 
 [[package]]
 name = "mooncalc-maps"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "mooncalc-core",
  "mooncalc-visibility",
@@ -3192,14 +3192,14 @@ dependencies = [
 
 [[package]]
 name = "mooncalc-spk"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "mooncalc-core",
 ]
 
 [[package]]
 name = "mooncalc-tauri"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "mooncalc-app",
  "serde",
@@ -3210,7 +3210,7 @@ dependencies = [
 
 [[package]]
 name = "mooncalc-visibility"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "mooncalc-core",
  "mooncalc-hijri",

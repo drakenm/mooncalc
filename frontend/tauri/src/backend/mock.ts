@@ -141,7 +141,7 @@ export class MockBackend implements Backend {
   async appInfo(): Promise<AppInfo> {
     return {
       name: 'MoonCalc',
-      version: '0.1.1',
+      version: '0.1.2',
       runtime: 'mock (browser)',
       ephemerisBackends: structuredClone(BACKENDS),
       defaultEphemeris: 'meeus',
